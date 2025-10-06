@@ -22,8 +22,33 @@ class OrderBookDispatcher {
         return true
     }
 
-    update() {
-        //addOrder, removeOrder, or update amount
+    /**
+     * Update graph
+     * @param {'created'|'updated'|'removed'} type
+     * @param {Order} order
+     */
+    update(type, order) {
+        switch (type) {
+            case 'created':
+                this.graph.addOrder(order)
+                break
+            case 'updated':
+                const existing = this.graph.getOrder(order.id)
+                if (!existing) {
+                    console.error(`Failed to locate the order ${order.id} in the graph`)
+                } else {
+                    existing.amount = order.amount
+                    existing.updated = order.updated
+                    //TODO: bump expiration if order order.expires updated
+                    //TODO: check status change
+                }
+                break
+            case 'removed':
+                this.graph.removeOrder(order.id)
+                break
+            default:
+                throw new Error('Unknown order update action: ' + type)
+        }
     }
 
     /**

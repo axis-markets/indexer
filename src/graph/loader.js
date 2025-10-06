@@ -3,14 +3,21 @@ class DataLoader {
      * @type {function}
      * @protected
      */
-    onEvent
+    onTrade
+    /**
+     * @type {function}
+     * @protected
+     */
+    onOrderEvent
 
     /**
-     * @param {function} onEvent
+     * @param {DataLoaderOnTrade} onTrade
+     * @param {DataLoaderOnOrderEvent} onOrderEvent
      * @virtual
      */
-    listen(onEvent) {
-        this.onEvent = onEvent
+    listen(onTrade, onOrderEvent) {
+        this.onTrade = onTrade
+        this.onOrderEvent = onOrderEvent
     }
 
     /**
@@ -22,3 +29,14 @@ class DataLoader {
 }
 
 module.exports = DataLoader
+
+/**
+ * @callback DataLoaderOnTrade
+ * @param {Trade} trade
+ */
+
+/**
+ * @callback DataLoaderOnOrderEvent
+ * @param {'created'|'updated'|'removed'} type
+ * @param {Order} order
+ */

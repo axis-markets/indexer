@@ -1,3 +1,5 @@
+const Order = require('./entries/order')
+const Trade = require('./entries/trade')
 const HistoryStorage = require('./history/history-storage')
 const InMemoryHistoryStorage = require('./history/inmemory-history-storage')
 const DataLoader = require('./graph/loader')
@@ -14,7 +16,16 @@ class Indexer {
         this.dispatcher = new OrderBookDispatcher()
         this.loader = dataLoader
         this.historyStorage = historyStorage
-        dataLoader.listen(evt => this.dispatcher.update(evt))
+        dataLoader.listen(trade => {
+            this.historyStorage.storeTrade(trade)
+                .catch(e => console.error(e))
+        }, (type, order) => {
+            this.dispatcher.update(type, order)
+            if (type === 'removed') {
+                this.historyStorage.storeOrder(order) //TODO: check order status
+                    .catch(e => console.error(e))
+            }
+        })
         if (apiPort) {
             initApiServer(this.dispatcher, apiPort)
                 .catch(e => console.error(e))
@@ -48,4 +59,13 @@ class Indexer {
     }
 }
 
-module.exports = {Indexer, OrderBookDispatcher, DataLoader, HistoryStorage, InMemoryHistoryStorage, initApiServer}
+module.exports = {
+    Indexer,
+    OrderBookDispatcher,
+    DataLoader,
+    HistoryStorage,
+    InMemoryHistoryStorage,
+    Order,
+    Trade,
+    initApiServer
+}

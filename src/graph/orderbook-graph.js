@@ -40,6 +40,15 @@ class OrderBookGraph {
     }
 
     /**
+     * Load order from the graph
+     * @param {bigint} orderId
+     * @return {Order}
+     */
+    getOrder(orderId) {
+        return this.allOrders.get(orderId)
+    }
+
+    /**
      * Inserts a given order into the order book graph
      * @param {Order} order
      */
