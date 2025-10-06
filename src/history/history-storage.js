@@ -1,4 +1,3 @@
-const Order = require('../entries/order')
 const {NotImplemented} = require('../utils/interface-errors')
 
 class HistoryStorage {
@@ -6,6 +5,7 @@ class HistoryStorage {
      * Store orderbook trade
      * @param {Trade} trade
      * @return {Promise<void>}
+     * @abstract
      */
     async storeTrade(trade) {
         throw new NotImplemented()
@@ -14,10 +14,9 @@ class HistoryStorage {
     /**
      * Store archived order
      * @param {Order} order
+     * @abstract
      */
     async storeOrder(order) {
-        if (order.status === Order.ORDER_STATUS.ACTIVE)
-            throw new Error('Attempt to archive active order ' + order.id)
         throw new NotImplemented()
     }
 
@@ -25,6 +24,7 @@ class HistoryStorage {
      * Load trades history
      * @param {{limit: number, [cursor]: string, [pair]: string[], [trader]: string}} filter
      * @return {Promise<Trade[]>}
+     * @abstract
      */
     async getTrades(filter) {
         throw new NotImplemented()
@@ -34,14 +34,15 @@ class HistoryStorage {
      * Load archived orders
      * @param {{limit: number, [owner]: string, [pair]: string[], [cursor]: string}} filter
      * @return {Promise<Order[]>}
+     * @abstract
      */
     async getOrders(filter) {
         throw new NotImplemented()
     }
 
     /**
-     * @virtual
      * @return {Promise}
+     * @virtual
      */
     dispose(){
     }

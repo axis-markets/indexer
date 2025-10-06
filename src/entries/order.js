@@ -134,9 +134,16 @@ class Order {
  * @type {{}}
  */
 const ORDER_KIND_MAP = {
-    1: 'LIMIT'
+    1: 'LIMIT'/*,
+    'MARKET',
+    'STOP_LOSS',
+    'ICEBERG'*/
 }
 
+/**
+ * Reverse order status mapping
+ * @type {{}}
+ */
 const ORDER_STATUS_MAP = {
     0: 'ACTIVE',
     1: 'FILLED',

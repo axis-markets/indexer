@@ -1,5 +1,6 @@
 const {normalizeLimit, isValidActor, parseIdCursor} = require('../utils/validation')
 const stdErrors = require('../server/errors')
+const {StrKey} = require('@stellar/stellar-base')
 
 class HistoryDispatcher {
     /**
@@ -27,6 +28,9 @@ class HistoryDispatcher {
                 throw stdErrors.validationError('owner')
             params.owner = filter.owner
         }
+        if (filter.pair) {
+            params.pair = validatePair(filter.pair)
+        }
         if (filter.cursor) {
             params.cursor = parseIdCursor(filter.cursor)
         }
@@ -51,6 +55,9 @@ class HistoryDispatcher {
                 throw stdErrors.validationError('trader')
             params.trader = filter.trader
         }
+        if (filter.pair) {
+            params.pair = validatePair(filter.pair)
+        }
         if (filter.cursor) {
             params.cursor = parseIdCursor(filter.cursor)
         }
@@ -62,6 +69,12 @@ class HistoryDispatcher {
             return serialized
         })
     }
+}
+
+function validatePair(pair) {
+    if (!(pair instanceof Array) || pair.length !== 2 || pair.some(v => !StrKey.isValidContract(v)))
+        throw stdErrors.validationError('pair')
+    return pair
 }
 
 module.exports = HistoryDispatcher

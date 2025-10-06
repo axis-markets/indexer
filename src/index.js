@@ -1,4 +1,5 @@
 const HistoryStorage = require('./history/history-storage')
+const InMemoryHistoryStorage = require('./history/inmemory-history-storage')
 const DataLoader = require('./graph/loader')
 const OrderBookDispatcher = require('./graph/orderbook-dispatcher')
 const {initApiServer} = require('./server/api')
@@ -47,4 +48,4 @@ class Indexer {
     }
 }
 
-module.exports = {Indexer, OrderBookDispatcher, DataLoader, HistoryStorage, initApiServer}
+module.exports = {Indexer, OrderBookDispatcher, DataLoader, HistoryStorage, InMemoryHistoryStorage, initApiServer}
