@@ -1,6 +1,6 @@
+const {StrKey} = require('@stellar/stellar-base')
 const {normalizeLimit, isValidActor, parseIdCursor} = require('../utils/validation')
 const stdErrors = require('../server/errors')
-const {StrKey} = require('@stellar/stellar-base')
 
 class HistoryDispatcher {
     /**

@@ -1,8 +1,11 @@
 const {approximatePrice} = require('../utils/price')
 
+/**
+ * @interface
+ */
 class Trade {
     /**
-     * Unique trade id
+     * Unique trade ID
      * @type {bigint}
      */
     id
@@ -42,36 +45,36 @@ class Trade {
      */
     bought
     /**
-     * Transaction hash
+     * Data pagination cursor
      * @type {string}
      */
-    txHash
+    cursor
     /**
      * Trade date
-     * @type {Date}
+     * @type {number}
      */
     ts
+}
 
-    /**
-     * Returns a trade in the serialization-ready format
-     */
-    toJSON() {
-        const price = ''
-        const res = {
-            id: this.id.toString(),
-            order: this.order.toString(),
-            taker: this.taker,
-            maker: this.maker,
-            soldAsset: this.soldAsset,
-            boughtAsset: this.boughtAsset,
-            sold: this.sold.toString(),
-            bought: this.bought.toString(),
-            price: approximatePrice(this.bought, this.sold),
-            txHash: this.txHash,
-            timestamp: new Date(this.ts).toISOString()
-        }
-        return res
+/**
+ * Copies fields from a trade for serialization
+ * @param {Trade} trade
+ */
+function serializeTrade(trade) {
+    const res = {
+        id: trade.id.toString(),
+        order: trade.order.toString(),
+        taker: trade.taker,
+        maker: trade.maker,
+        soldAsset: trade.soldAsset,
+        boughtAsset: trade.boughtAsset,
+        sold: trade.sold.toString(),
+        bought: trade.bought.toString(),
+        price: approximatePrice(trade.bought, trade.sold),
+        cursor: trade.cursor,
+        timestamp: new Date(this.ts).toISOString()
     }
+    return res
 }
 
 module.exports = Trade

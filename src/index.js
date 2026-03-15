@@ -2,30 +2,31 @@ const Order = require('./entries/order')
 const Trade = require('./entries/trade')
 const HistoryStorage = require('./history/history-storage')
 const InMemoryHistoryStorage = require('./history/inmemory-history-storage')
-const DataLoader = require('./graph/loader')
+const DataSource = require('./graph/data-source')
 const OrderBookDispatcher = require('./graph/orderbook-dispatcher')
 const {initApiServer} = require('./server/api')
 
 class Indexer {
     /**
-     * @param {DataLoader} dataLoader
+     * @param {DataSource} dataSource
      * @param {HistoryStorage} historyStorage
-     * @param {number} [apiPort] - Port for REST API  server, if omitted the server is disabled
+     * @param {number} [apiPort] - Port for REST API server, if omitted the server is disabled
      */
-    constructor({dataLoader, historyStorage, apiPort}) {
+    constructor({dataSource, historyStorage, apiPort}) {
         this.dispatcher = new OrderBookDispatcher()
-        this.loader = dataLoader
+        this.dataSource = dataSource
         this.historyStorage = historyStorage
-        dataLoader.listen(trade => {
+        dataSource.onTrade = trade => {
             this.historyStorage.storeTrade(trade)
                 .catch(e => console.error(e))
-        }, (type, order) => {
+        }
+        dataSource.onOrderEvent = (type, order) => {
             this.dispatcher.update(type, order)
             if (type === 'removed') {
                 this.historyStorage.storeOrder(order) //TODO: check order status
                     .catch(e => console.error(e))
             }
-        })
+        }
         if (apiPort) {
             initApiServer(this.dispatcher, apiPort)
                 .catch(e => console.error(e))
@@ -38,10 +39,10 @@ class Indexer {
      */
     dispatcher
     /**
-     * @type {DataLoader}
+     * @type {DataSource}
      * @readonly
      */
-    loader
+    dataSource
     /**
      * @type {HistoryStorage}
      * @readonly
@@ -52,7 +53,7 @@ class Indexer {
      * Finalize and release resources
      */
     dispose() {
-        this.loader?.dispose()
+        this.dataSource?.dispose()
             .catch(e => console.error(e))
         this.historyStorage?.dispose()
             .catch(e => console.error(e))
@@ -62,7 +63,7 @@ class Indexer {
 module.exports = {
     Indexer,
     OrderBookDispatcher,
-    DataLoader,
+    DataSource,
     HistoryStorage,
     InMemoryHistoryStorage,
     Order,

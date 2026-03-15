@@ -1,5 +1,6 @@
 const Order = require('../entries/order')
 const HistoryStorage = require('./history-storage')
+const {toPair} = require('../utils/asset-pair')
 
 class InMemoryHistoryStorage extends HistoryStorage {
     constructor() {
@@ -18,26 +19,48 @@ class InMemoryHistoryStorage extends HistoryStorage {
      * @private
      */
     orders
+    /**
+     * @type {string}
+     * @private
+     */
+    cursor
 
     /**
      * @inheritDoc
      */
-    async storeTrade(trade) {
+    storeTrade(trade) {
         this.trades.push(trade)
     }
 
     /**
      * @inheritDoc
      */
-    async storeOrder(order) {
+    storeOrder(order) {
         if (order.status === Order.ORDER_STATUS.ACTIVE)
             throw new Error('Attempt to archive active order ' + order.id)
         this.orders.push(order)
     }
 
     /**
+     * Set event stream cursor and save changes
+     * @param {String} cursor
+     * @return {Promise<void>}
+     */
+    async save(cursor) {
+        this.cursor = cursor
+    }
+
+    /**
+     * Get event stream cursor
+     * @return {Promise<string>}
+     */
+    async getCursor() {
+        return this.cursor
+    }
+
+    /**
      * Load trades history
-     * @param {{limit: number, [cursor]: string, [pair]: string[], [trader]: string}} filter
+     * @param {{limit: number, [cursor]: string, [pair]: string, [trader]: string}} filter
      * @return {Promise<Trade[]>}
      */
     async getTrades(filter) {
@@ -49,7 +72,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
                 continue
             if (filter.trader && trade.taker !== filter.trader && trade.maker !== filter.trader)
                 continue
-            if (filter.pair && !filter.pair.every(a => trade.soldAsset === a || trade.boughtAsset === a))
+            if (filter.pair && filter.pair !== toPair(trade.soldAsset, trade.boughtAsset))
                 continue
             res.push(trade)
             if (res.length >= filter.limit)
@@ -72,7 +95,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
                 continue
             if (filter.owner && order.owner !== filter.owner)
                 continue
-            if (filter.pair && !filter.pair.every(a => order.selling === a || order.buying === a))
+            if (filter.pair && filter.pair !== toPair(trade.soldAsset, trade.boughtAsset))
                 continue
             res.push(order)
             if (res.length >= filter.limit)
@@ -85,7 +108,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
      * @return {Promise}
      * @virtual
      */
-    dispose() {
+    async dispose() {
     }
 }
 
