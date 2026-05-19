@@ -16,19 +16,23 @@ class Indexer {
         this.dispatcher = new OrderBookDispatcher()
         this.dataSource = dataSource
         this.historyStorage = historyStorage
-        dataSource.onTrade = trade => {
-            this.historyStorage.storeTrade(trade)
+        dataSource.onTradeEvent = trade => {
+            this.historyStorage.storeTrade(Trade.fromEvent(trade))
                 .catch(e => console.error(e))
         }
-        dataSource.onOrderEvent = (type, order) => {
-            this.dispatcher.update(type, order)
-            if (type === 'removed') {
-                this.historyStorage.storeOrder(order) //TODO: check order status
+        dataSource.onOrderEvent = orderEvent => {
+            const order = Order.fromEvent(orderEvent)
+            this.dispatcher.update(orderEvent.action, order)
+            if (orderEvent.action === 'removed') {
+                if (order.amount > 0n) {
+                    order.status = Order.ORDER_STATUS.CANCELED
+                }
+                this.historyStorage.storeOrder(order)
                     .catch(e => console.error(e))
             }
         }
         if (apiPort) {
-            initApiServer(this.dispatcher, apiPort)
+            initApiServer(this, apiPort)
                 .catch(e => console.error(e))
         }
     }

@@ -11,7 +11,7 @@ class HistoryStorage {
      * @return {Promise<void>}
      * @abstract
      */
-    storeTrade(trade) {
+    async storeTrade(trade) {
         throw new NotImplemented()
     }
 
@@ -20,7 +20,7 @@ class HistoryStorage {
      * @param {Order} order
      * @abstract
      */
-    storeOrder(order) {
+    async storeOrder(order) {
         throw new NotImplemented()
     }
 

@@ -1,5 +1,5 @@
-const stdErrors = require('../server/errors')
 const {StrKey} = require('@stellar/stellar-base')
+const stdErrors = require('../server/errors')
 
 /**
  * Normalize page size based on default and max value
@@ -9,18 +9,14 @@ const {StrKey} = require('@stellar/stellar-base')
  * @return {number}
  */
 function normalizeLimit(limit, defaultValue = 10, max = 100) {
-    try {
-        limit = parseInt(limit || 0, 10)
-        if (limit < 0) {
-            limit = defaultValue
-        }
-        if (limit > max) {
-            limit = max
-        }
-        return limit
-    } catch (e) {
-        throw stdErrors.validationError('limit')
+    limit = parseInt(limit, 10)
+    if (isNaN(limit) || limit <= 0) {
+        limit = defaultValue
     }
+    if (limit > max) {
+        limit = max
+    }
+    return limit
 }
 
 /**

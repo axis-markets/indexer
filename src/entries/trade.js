@@ -1,8 +1,7 @@
 const {approximatePrice} = require('../utils/price')
+const {formatDateUTC} = require('../utils/date')
 
-/**
- * @interface
- */
+/** On-chain trade event */
 class Trade {
     /**
      * Unique trade ID
@@ -54,6 +53,20 @@ class Trade {
      * @type {number}
      */
     ts
+
+    toJSON() {
+        return serializeTrade(this)
+    }
+
+    /**
+     * @param {{}} tradeEvent
+     * @return {Trade}
+     */
+    static fromEvent(tradeEvent) {
+        const trade = new Trade()
+        Object.assign(trade, tradeEvent) //fields are identical, just create typed object
+        return trade
+    }
 }
 
 /**
@@ -61,7 +74,7 @@ class Trade {
  * @param {Trade} trade
  */
 function serializeTrade(trade) {
-    const res = {
+    return {
         id: trade.id.toString(),
         order: trade.order.toString(),
         taker: trade.taker,
@@ -72,9 +85,8 @@ function serializeTrade(trade) {
         bought: trade.bought.toString(),
         price: approximatePrice(trade.bought, trade.sold),
         cursor: trade.cursor,
-        timestamp: new Date(this.ts).toISOString()
+        timestamp: formatDateUTC(trade.ts)
     }
-    return res
 }
 
 module.exports = Trade

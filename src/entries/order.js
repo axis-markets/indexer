@@ -1,4 +1,5 @@
 const {toRationalPrice} = require('../utils/price')
+const {formatDateUTC} = require('../utils/date')
 
 class Order {
     /**
@@ -39,7 +40,7 @@ class Order {
      * Initial selling amount
      * @type {bigint}
      */
-    total
+    quote
     /**
      * Selling amount left
      * @type {bigint}
@@ -87,6 +88,10 @@ class Order {
         return `[${this.id}] ${this.buying}/${this.selling} price ${this.price} amount ${this.amount}`
     }
 
+    toJSON() {
+        return serializeOrder(this)
+    }
+
     static ORDER_KIND = {
         LIMIT: 1
     }
@@ -94,8 +99,34 @@ class Order {
     static ORDER_STATUS = {
         ACTIVE: 0,
         FILLED: 1,
-        CANCELED: 2,
-        EXPIRED: 3
+        CANCELED: 2
+    }
+
+    /**
+     * @param {OrderEvent} orderEvent
+     * @return {Order}
+     */
+    static fromEvent(orderEvent) {
+        const order = new Order()
+        order.id = orderEvent.id
+        order.kind = ORDER_KIND_MAP[orderEvent.kind]
+        order.buying = orderEvent.buying
+        order.selling = orderEvent.selling
+        order.amount = orderEvent.amount
+        order.quote = orderEvent.quote
+        order.price = orderEvent.price
+        order.owner = orderEvent.owner
+        if (orderEvent.action === 'created') {
+            order.created = orderEvent.ts
+        }
+        order.updated = orderEvent.ts
+        order.expires = orderEvent.expires
+        if (orderEvent.amount > 0n) {
+            order.status = Order.ORDER_STATUS.ACTIVE
+        } else {
+            order.status = Order.ORDER_STATUS.FILLED
+        }
+        return order
     }
 }
 
@@ -117,8 +148,7 @@ const ORDER_KIND_MAP = {
 const ORDER_STATUS_MAP = {
     0: 'ACTIVE',
     1: 'FILLED',
-    2: 'CANCELED',
-    3: 'EXPIRED'
+    2: 'CANCELED'
 }
 
 function serializeOrder(order) {
@@ -130,10 +160,12 @@ function serializeOrder(order) {
         selling: order.selling,
         price: order.price.toString(),
         rprice: toRationalPrice(order.price),
-        total: order.total.toString(),
+        quote: order.quote.toString(),
         amount: order.amount.toString(),
-        owner: order.owner,
-        expires: new Date(order.expires).toString()
+        owner: order.owner
+    }
+    if (order.expires > 0){
+        res.expires = formatDateUTC(order.expires)
     }
     if (order.iceberg > 0n) {
         res.iceberg = order.iceberg.toString()
@@ -142,8 +174,10 @@ function serializeOrder(order) {
         res.stop = order.stop.toString()
     }
     if (order.created) {
-        res.created = new Date(order.created).toString()
-        res.updated = new Date(order.updated).toString()
+        res.created = formatDateUTC(order.created)
+    }
+    if (order.updated) {
+        res.updated = formatDateUTC(order.updated)
     }
     return res
 }

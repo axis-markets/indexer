@@ -33,13 +33,15 @@ class OrderBookGraphSide {
      * @returns {boolean}
      */
     removeOrder(order) {
-        const removed = this.getMarkets(order.selling).removeOrder(order)
-            || this.getMarkets(order.buying).removeOrder(order)
+        //orders are stored under selling asset on both sides; only that bucket needs cleanup
+        const markets = this.getMarkets(order.selling, false)
+        if (!markets)
+            return true
+        const removed = markets.removeOrder(order)
         if (removed) {
             this.removeMarketsIfEmpty(order.selling)
-            this.removeMarketsIfEmpty(order.buying)
         }
-        return false
+        return removed
     }
 
     /**

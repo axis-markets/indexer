@@ -28,14 +28,14 @@ class InMemoryHistoryStorage extends HistoryStorage {
     /**
      * @inheritDoc
      */
-    storeTrade(trade) {
+    async storeTrade(trade) {
         this.trades.push(trade)
     }
 
     /**
      * @inheritDoc
      */
-    storeOrder(order) {
+    async storeOrder(order) {
         if (order.status === Order.ORDER_STATUS.ACTIVE)
             throw new Error('Attempt to archive active order ' + order.id)
         this.orders.push(order)
@@ -95,7 +95,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
                 continue
             if (filter.owner && order.owner !== filter.owner)
                 continue
-            if (filter.pair && filter.pair !== toPair(trade.soldAsset, trade.boughtAsset))
+            if (filter.pair && filter.pair !== toPair(order.selling, order.buying))
                 continue
             res.push(order)
             if (res.length >= filter.limit)

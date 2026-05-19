@@ -1,5 +1,6 @@
 const {StrKey} = require('@stellar/stellar-base')
 const {normalizeLimit, isValidActor, parseIdCursor} = require('../utils/validation')
+const {toPair} = require('../utils/asset-pair')
 const stdErrors = require('../server/errors')
 
 class HistoryDispatcher {
@@ -29,7 +30,8 @@ class HistoryDispatcher {
             params.owner = filter.owner
         }
         if (filter.pair) {
-            params.pair = validatePair(filter.pair)
+            const [a, b] = validatePair(filter.pair)
+            params.pair = toPair(a, b)
         }
         if (filter.cursor) {
             params.cursor = parseIdCursor(filter.cursor)
@@ -56,15 +58,16 @@ class HistoryDispatcher {
             params.trader = filter.trader
         }
         if (filter.pair) {
-            params.pair = validatePair(filter.pair)
+            const [a, b] = validatePair(filter.pair)
+            params.pair = toPair(a, b)
         }
         if (filter.cursor) {
             params.cursor = parseIdCursor(filter.cursor)
         }
         params.limit = normalizeLimit(filter.limit, 20, 500)
         const data = await this.historyStorage.getTrades(params)
-        return data.map(order => {
-            const serialized = order.toJSON()
+        return data.map(trade => {
+            const serialized = trade.toJSON()
             serialized.cursor = serialized.id
             return serialized
         })

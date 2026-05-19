@@ -145,7 +145,7 @@ class OrderBookDispatcher {
             }
         }
 
-        const range = this.marketsCache.markets.range(limit, from)
+        const range = this.marketsCache.markets.range(from, limit)
         return range.map(assets => {
             return {
                 baseAsset: assets[0],
@@ -161,5 +161,7 @@ class OrderBookDispatcher {
         })
     }
 }
+
+
 
 module.exports = OrderBookDispatcher

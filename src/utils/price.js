@@ -1,4 +1,6 @@
-const PRECISION = 10n ** 19n
+/** Default price precision */
+const PRECISION = 10n ** 18n
+/** Default price precision for approximate calculations */
 const N_PRECISION = Number(PRECISION)
 
 /**
