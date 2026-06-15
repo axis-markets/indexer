@@ -1,4 +1,4 @@
-const AssetMarkets = require('./asset-markets')
+const AssetMarkets = require('./asset-market')
 const OrderbookMarketsList = require('./orderbook-markets-list')
 
 class OrderBookGraphSide {

@@ -1,14 +1,14 @@
 /**
  * Maintains a mapping of assets to order vectors
  */
-class AssetMarkets {
+class AssetMarket {
     /**
      * @param {string} buyingAsset - Buying asset for this markets group
-     * @param {TradeDirection} type - Buying/selling
+     * @param {TradeDirection} side - Buying/selling
      */
-    constructor(buyingAsset, type) {
+    constructor(buyingAsset, side) {
         this.buyingAsset = buyingAsset
-        this.type = type
+        this.side = side
         this.markets = new Map()
     }
 
@@ -21,7 +21,7 @@ class AssetMarkets {
      * @type {TradeDirection}
      * @readonly
      */
-    type
+    side
     /**
      * @type {Map<string,Order[]>}
      * @private
@@ -77,7 +77,7 @@ class AssetMarkets {
             for (let i = 0; i < orders.length; i++) {
                 //iterate until we find an item with better/worse price than new order price (depending on order type), and insert before it
                 const existing = orders[i]
-                const shouldInsert = this.type === 'buying' ?
+                const shouldInsert = this.side === 'buying' ?
                     existing.price < newOrder.price :
                     existing.price > newOrder.price
                 if (shouldInsert) {
@@ -118,8 +118,10 @@ class AssetMarkets {
      * @private
      */
     getCounterAsset(entry) {
-        return entry.selling === this.buyingAsset ? entry.buying : entry.selling
+        return entry.selling === this.buyingAsset ?
+            entry.buying :
+            entry.selling
     }
 }
 
-module.exports = AssetMarkets
+module.exports = AssetMarket

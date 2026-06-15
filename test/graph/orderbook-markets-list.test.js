@@ -1,5 +1,5 @@
 const OrderbookMarketsList = require('../../src/graph/orderbook-markets-list')
-const AssetMarkets = require('../../src/graph/asset-markets')
+const AssetMarkets = require('../../src/graph/asset-market')
 const {makeOrder} = require('../helpers/order-factory')
 
 describe('OrderbookMarketsList', () => {
