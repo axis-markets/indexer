@@ -1,6 +1,6 @@
 {
   "name": "@axis-markets/indexer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Service that scans AXIS events and maintains current orderbook state in memory",
   "main": "src/index.js",

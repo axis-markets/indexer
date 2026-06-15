@@ -24,7 +24,7 @@ class AssetMarket {
     side
     /**
      * @type {Map<string,Order[]>}
-     * @private
+     * @readonly
      */
     markets
 

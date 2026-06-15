@@ -17,7 +17,7 @@ class OrderBookGraphSide {
     side
     /**
      * @type {Map<string,AssetMarkets>}
-     * @private
+     * @readonly
      */
     graphMap
 
@@ -25,7 +25,7 @@ class OrderBookGraphSide {
      * @param {Order} order
      */
     addOrder(order) {
-        this.getMarkets(order.selling).addOrder(order)
+        this.getMarkets(this.getIndexAsset(order)).addOrder(order)
     }
 
     /**
@@ -33,13 +33,13 @@ class OrderBookGraphSide {
      * @returns {boolean}
      */
     removeOrder(order) {
-        //orders are stored under selling asset on both sides; only that bucket needs cleanup
-        const markets = this.getMarkets(order.selling, false)
+        const key = this.getIndexAsset(order)
+        const markets = this.getMarkets(key, false)
         if (!markets)
             return true
         const removed = markets.removeOrder(order)
         if (removed) {
-            this.removeMarketsIfEmpty(order.selling)
+            this.removeMarketsIfEmpty(key)
         }
         return removed
     }
@@ -60,6 +60,15 @@ class OrderBookGraphSide {
     }
 
     /**
+     * Markets for orders indexed under the given asset, or undefined
+     * @param {string} asset
+     * @return {AssetMarkets|undefined}
+     */
+    get(asset) {
+        return this.graphMap.get(asset)
+    }
+
+    /**
      * @param {string} asset
      * @private
      */
@@ -75,6 +84,17 @@ class OrderBookGraphSide {
      */
     getAllMarkets(){
         return new OrderbookMarketsList().loadFromMarkets(this.graphMap.values())
+    }
+
+
+    /**
+     * Asset under which an order is indexed on this side orderbook side
+     * @param {Order} order
+     * @return {string}
+     * @private
+     */
+    getIndexAsset(order) {
+        return this.side === 'selling' ? order.buying : order.selling
     }
 }
 

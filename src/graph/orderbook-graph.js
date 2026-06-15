@@ -11,12 +11,12 @@ class OrderBookGraph {
 
     /**
      * @type {OrderBookGraphSide}
-     * @private
+     * @readonly
      */
     sellingGraph
     /**
      * @type {OrderBookGraphSide}
-     * @private
+     * @readonly
      */
     buyingGraph
     /**
