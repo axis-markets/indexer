@@ -26,10 +26,16 @@ The indexer is meant to be embedded rather than run as a turnkey binary: the ent
 const {Indexer, InMemoryHistoryStorage} = require('@axis-markets/indexer')
 
 const indexer = new Indexer({
-    dataSource,           // your DataSource implementation — subscribes to AXIS contract events
+    dataSource,                       // your DataSource implementation — subscribes to AXIS contract events
     historyStorage: new InMemoryHistoryStorage(),
-    apiPort: 8070         // optional; omit to disable the HTTP server
+    network: 'public',                // Stellar network: 'public' or 'testnet'
+    contractAddress: 'C...',          // AXIS contract address
+    apiPort: 8070                     // optional; omit to disable the HTTP server
 })
+
+// init() resumes from the last processed cursor, rebuilds the in-memory orderbook from
+// the persisted active orders, then subscribes the data source to live contract events
+await indexer.init()
 ```
 
 ## Test
@@ -46,9 +52,10 @@ pnpm test
   and orderbook queries to the API layer.
 - **`DataSource`** (abstract) — implement this interface to subscribe to AXIS contract events. The indexer wires its
   `onOrderEvent` and `onTrade` callbacks into the dispatcher and history storage.
-- **`HistoryStorage`** (abstract) — implement this interface to persist filled/cancelled orders and executed trades.
-  `InMemoryHistoryStorage` ships as a reference implementation; production deployments are expected to use a durable
-  backend.
+- **`HistoryStorage`** (abstract) — implement this interface to persist active orders, archived (filled/cancelled)
+  orders, executed trades, and the last processed event cursor. On restart the indexer reloads active orders to rebuild
+  the orderbook and resumes the data source from the stored cursor. `InMemoryHistoryStorage` ships as a reference
+  implementation; production deployments are expected to use a durable backend.
 - **HTTP API** — Express server with CORS, registered through `src/server/router.js`.
 
 ## HTTP API

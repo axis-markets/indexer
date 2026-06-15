@@ -22,7 +22,7 @@ class HistoryDispatcher {
      * @param {{limit: number, [owner]: string, [pair]: string[], [cursor]: string}} filter
      * @return {Promise<Order[]>}
      */
-    async getOrders(filter = {}) {
+    async loadOrdersHistory(filter = {}) {
         const params = {}
         if (filter.owner) {
             if (!isValidActor(filter.owner))
@@ -37,7 +37,7 @@ class HistoryDispatcher {
             params.cursor = parseIdCursor(filter.cursor)
         }
         params.limit = normalizeLimit(filter.limit, 20, 500)
-        const data = await this.historyStorage.getOrders(params)
+        const data = await this.historyStorage.loadArchivedOrders(params)
         return data.map(order => {
             const serialized = order.toJSON()
             serialized.cursor = serialized.id
@@ -50,7 +50,7 @@ class HistoryDispatcher {
      * @param {{limit: number, [cursor]: string, [pair]: string[], [trader]: string}} filter
      * @return {Promise<Trade[]>}
      */
-    async getTrades(filter) {
+    async loadTradesHistory(filter) {
         const params = {}
         if (filter.trader) {
             if (!isValidActor(filter.trader))
@@ -65,7 +65,7 @@ class HistoryDispatcher {
             params.cursor = parseIdCursor(filter.cursor)
         }
         params.limit = normalizeLimit(filter.limit, 20, 500)
-        const data = await this.historyStorage.getTrades(params)
+        const data = await this.historyStorage.loadTrades(params)
         return data.map(trade => {
             const serialized = trade.toJSON()
             serialized.cursor = serialized.id

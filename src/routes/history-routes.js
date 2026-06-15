@@ -10,10 +10,10 @@ module.exports = function (app, indexer) {
     //archived orders from db
     registerRoute(app,
         '/order-history', {},
-        async req => await dispatcher.getOrders(req.query))
+        async req => await dispatcher.loadOrdersHistory(req.query))
 
     //get recent trades
     registerRoute(app,
         '/trades', {},
-        async req => await dispatcher.getTrades(req.query))
+        async req => await dispatcher.loadTradesHistory(req.query))
 }

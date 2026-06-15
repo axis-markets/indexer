@@ -23,25 +23,50 @@ function makeTrade(overrides = {}) {
 }
 
 describe('InMemoryHistoryStorage', () => {
-    test('cursor round-trips through save/getCursor', async () => {
+    test('cursor is persisted by storeTrade and storeOrder and read back via getCursor', async () => {
         const storage = new InMemoryHistoryStorage()
         expect(await storage.getCursor()).toBeUndefined()
-        await storage.save('cursor-1')
+        await storage.storeTrade(makeTrade({id: 1n}), 'cursor-1')
         expect(await storage.getCursor()).toBe('cursor-1')
+        await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.FILLED}), 'cursor-2')
+        expect(await storage.getCursor()).toBe('cursor-2')
     })
 
     test('storeTrade appends to the in-memory log', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n}))
         await storage.storeTrade(makeTrade({id: 2n}))
-        const trades = await storage.getTrades({limit: 10})
+        const trades = await storage.loadTrades({limit: 10})
         expect(trades.map(t => t.id)).toEqual([2n, 1n])
     })
 
-    test('storeOrder rejects an ACTIVE order', async () => {
+    test('storeOrder keeps an ACTIVE order in the active set, not the archive', async () => {
         const storage = new InMemoryHistoryStorage()
-        const active = makeOrder({id: 1n, status: Order.ORDER_STATUS.ACTIVE})
-        await expect(storage.storeOrder(active)).rejects.toThrow(/Attempt to archive active order/)
+        await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.ACTIVE}))
+        await storage.storeOrder(makeOrder({id: 2n, status: Order.ORDER_STATUS.ACTIVE}))
+        const active = await storage.loadActiveOrders({limit: 10})
+        expect(active.map(o => o.id)).toEqual([2n, 1n])
+        const archived = await storage.loadArchivedOrders({limit: 10})
+        expect(archived).toEqual([])
+    })
+
+    test('storeOrder moves an order from the active set to the archive when finalized', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.ACTIVE}))
+        //same order finalizes — must leave the active set and land in the archive
+        await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.FILLED}))
+        expect((await storage.loadActiveOrders({limit: 10})).map(o => o.id)).toEqual([])
+        expect((await storage.loadArchivedOrders({limit: 10})).map(o => o.id)).toEqual([1n])
+    })
+
+    test('loadActiveOrders filters by owner, pair and cursor', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeOrder(makeOrder({id: 1n, owner: 'X', selling: 'S', buying: 'B', status: Order.ORDER_STATUS.ACTIVE}))
+        await storage.storeOrder(makeOrder({id: 2n, owner: 'Y', selling: 'S', buying: 'B', status: Order.ORDER_STATUS.ACTIVE}))
+        await storage.storeOrder(makeOrder({id: 3n, owner: 'X', selling: 'X', buying: 'Y', status: Order.ORDER_STATUS.ACTIVE}))
+        expect((await storage.loadActiveOrders({limit: 10, owner: 'X'})).map(o => o.id)).toEqual([3n, 1n])
+        expect((await storage.loadActiveOrders({limit: 10, pair: 'S/B'})).map(o => o.id)).toEqual([2n, 1n])
+        expect((await storage.loadActiveOrders({limit: 10, cursor: 2n})).map(o => o.id)).toEqual([2n, 1n])
     })
 
     test('storeOrder accepts a finalized order', async () => {
@@ -50,68 +75,68 @@ describe('InMemoryHistoryStorage', () => {
         const cancelled = makeOrder({id: 2n, status: Order.ORDER_STATUS.CANCELED})
         await storage.storeOrder(filled)
         await storage.storeOrder(cancelled)
-        const orders = await storage.getOrders({limit: 10})
+        const orders = await storage.loadArchivedOrders({limit: 10})
         expect(orders.map(o => o.id)).toEqual([2n, 1n])
     })
 
-    test('getTrades respects limit and returns newest first', async () => {
+    test('loadTrades respects limit and returns newest first', async () => {
         const storage = new InMemoryHistoryStorage()
         for (let i = 1; i <= 5; i++) {
             await storage.storeTrade(makeTrade({id: BigInt(i)}))
         }
-        const trades = await storage.getTrades({limit: 2})
+        const trades = await storage.loadTrades({limit: 2})
         expect(trades.map(t => t.id)).toEqual([5n, 4n])
     })
 
-    test('getTrades filters by trader (matches maker or taker)', async () => {
+    test('loadTrades filters by trader (matches maker or taker)', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n, maker: 'A', taker: 'B'}))
         await storage.storeTrade(makeTrade({id: 2n, maker: 'C', taker: 'A'}))
         await storage.storeTrade(makeTrade({id: 3n, maker: 'D', taker: 'E'}))
-        const trades = await storage.getTrades({limit: 10, trader: 'A'})
+        const trades = await storage.loadTrades({limit: 10, trader: 'A'})
         expect(trades.map(t => t.id)).toEqual([2n, 1n])
     })
 
-    test('getTrades skips trades with id greater than the cursor', async () => {
+    test('loadTrades skips trades with id greater than the cursor', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n}))
         await storage.storeTrade(makeTrade({id: 2n}))
         await storage.storeTrade(makeTrade({id: 3n}))
-        const trades = await storage.getTrades({limit: 10, cursor: 2n})
+        const trades = await storage.loadTrades({limit: 10, cursor: 2n})
         expect(trades.map(t => t.id)).toEqual([2n, 1n])
     })
 
-    test('getOrders filters by owner', async () => {
+    test('loadArchivedOrders filters by owner', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeOrder(makeOrder({id: 1n, owner: 'X', status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 2n, owner: 'Y', status: Order.ORDER_STATUS.CANCELED}))
         await storage.storeOrder(makeOrder({id: 3n, owner: 'X', status: Order.ORDER_STATUS.FILLED}))
-        const orders = await storage.getOrders({limit: 10, owner: 'X'})
+        const orders = await storage.loadArchivedOrders({limit: 10, owner: 'X'})
         expect(orders.map(o => o.id)).toEqual([3n, 1n])
     })
 
-    test('getOrders honors cursor', async () => {
+    test('loadArchivedOrders honors cursor', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 2n, status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 3n, status: Order.ORDER_STATUS.FILLED}))
-        const orders = await storage.getOrders({limit: 10, cursor: 2n})
+        const orders = await storage.loadArchivedOrders({limit: 10, cursor: 2n})
         expect(orders.map(o => o.id)).toEqual([2n, 1n])
     })
 
-    test('getOrders filters by pair (matched against toPair(selling, buying))', async () => {
+    test('loadArchivedOrders filters by pair (matched against toPair(selling, buying))', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeOrder(makeOrder({id: 1n, selling: 'S', buying: 'B', status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 2n, selling: 'X', buying: 'Y', status: Order.ORDER_STATUS.FILLED}))
-        const orders = await storage.getOrders({limit: 10, pair: 'S/B'})
+        const orders = await storage.loadArchivedOrders({limit: 10, pair: 'S/B'})
         expect(orders.map(o => o.id)).toEqual([1n])
     })
 
-    test('getTrades filters by pair (matched against toPair(soldAsset, boughtAsset))', async () => {
+    test('loadTrades filters by pair (matched against toPair(soldAsset, boughtAsset))', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n, soldAsset: 'S', boughtAsset: 'B'}))
         await storage.storeTrade(makeTrade({id: 2n, soldAsset: 'X', boughtAsset: 'Y'}))
-        const trades = await storage.getTrades({limit: 10, pair: 'S/B'})
+        const trades = await storage.loadTrades({limit: 10, pair: 'S/B'})
         expect(trades.map(t => t.id)).toEqual([1n])
     })
 })

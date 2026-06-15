@@ -121,10 +121,14 @@ class Order {
         }
         order.updated = orderEvent.ts
         order.expires = orderEvent.expires
-        if (orderEvent.amount > 0n) {
-            order.status = Order.ORDER_STATUS.ACTIVE
+        if (orderEvent.action === 'removed') {
+            if (orderEvent.amount > 0n) {
+                order.status = Order.ORDER_STATUS.CANCELED
+            } else {
+                order.status = Order.ORDER_STATUS.FILLED
+            }
         } else {
-            order.status = Order.ORDER_STATUS.FILLED
+            order.status = Order.ORDER_STATUS.ACTIVE
         }
         return order
     }

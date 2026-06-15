@@ -1,12 +1,13 @@
+const {toPair} = require('../utils/asset-pair')
 const Order = require('../entries/order')
 const HistoryStorage = require('./history-storage')
-const {toPair} = require('../utils/asset-pair')
 
 class InMemoryHistoryStorage extends HistoryStorage {
     constructor() {
         super()
         this.trades = []
-        this.orders = []
+        this.archivedOrders = []
+        this.activeOrders = new Map()
     }
 
     /**
@@ -18,52 +19,47 @@ class InMemoryHistoryStorage extends HistoryStorage {
      * @type {Order[]}
      * @private
      */
-    orders
+    archivedOrders
+    /**
+     * @type {Map<bigint,Order>}
+     * @private
+     */
+    activeOrders
     /**
      * @type {string}
      * @private
      */
     cursor
 
-    /**
-     * @inheritDoc
-     */
-    async storeTrade(trade) {
+    /** @inheritDoc */
+    async storeTrade(trade, cursor) {
         this.trades.push(trade)
-    }
-
-    /**
-     * @inheritDoc
-     */
-    async storeOrder(order) {
-        if (order.status === Order.ORDER_STATUS.ACTIVE)
-            throw new Error('Attempt to archive active order ' + order.id)
-        this.orders.push(order)
-    }
-
-    /**
-     * Set event stream cursor and save changes
-     * @param {String} cursor
-     * @return {Promise<void>}
-     */
-    async save(cursor) {
         this.cursor = cursor
     }
 
-    /**
-     * Get event stream cursor
-     * @return {Promise<string>}
-     */
+    /** @inheritDoc */
+    async storeOrder(order, cursor) {
+        if (order.status === Order.ORDER_STATUS.ACTIVE){
+            this.activeOrders.set(order.id, order)
+        } else {
+            this.activeOrders.delete(order.id)
+            this.archivedOrders.push(order)
+        }
+        this.cursor = cursor
+    }
+    /*
+    async save(cursor) {
+
+        //await fs.writeFile(this.filePath, JSON.stringify(this.storage))
+    }*/
+
+    /** @inheritDoc */
     async getCursor() {
         return this.cursor
     }
 
-    /**
-     * Load trades history
-     * @param {{limit: number, [cursor]: string, [pair]: string, [trader]: string}} filter
-     * @return {Promise<Trade[]>}
-     */
-    async getTrades(filter) {
+    /** @inheritDoc */
+    async loadTrades(filter) {
         const res = []
         const {trades} = this
         for (let i = trades.length - 1; i >= 0; i--) {
@@ -81,35 +77,38 @@ class InMemoryHistoryStorage extends HistoryStorage {
         return res
     }
 
-    /**
-     * Load archived orders
-     * @param {{limit: number, [owner]: string, [pair]: string[], [cursor]: string}} filter
-     * @return {Promise<Order[]>}
-     */
-    async getOrders(filter) {
-        const res = []
-        const {orders} = this
-        for (let i = orders.length - 1; i >= 0; i--) {
-            const order = orders[i]
-            if (filter.cursor && order.id > filter.cursor)
-                continue
-            if (filter.owner && order.owner !== filter.owner)
-                continue
-            if (filter.pair && filter.pair !== toPair(order.selling, order.buying))
-                continue
-            res.push(order)
-            if (res.length >= filter.limit)
-                break
-        }
-        return res
+    /** @inheritDoc */
+    async loadArchivedOrders(filter) {
+        return filterOrders(this.archivedOrders, filter)
     }
 
-    /**
-     * @return {Promise}
-     * @virtual
-     */
+    /** @inheritDoc */
+    async loadActiveOrders(filter) {
+        return filterOrders(this.activeOrders.values(), filter)
+    }
+
+    /** @inheritDoc */
     async dispose() {
     }
+}
+
+function filterOrders(orders, filter) {
+    //accept both arrays and Map iterators (active orders are stored in a Map)
+    const list = Array.isArray(orders) ? orders : [...orders]
+    const res = []
+    for (let i = list.length - 1; i >= 0; i--) {
+        const order = list[i]
+        if (filter.cursor && order.id > filter.cursor)
+            continue
+        if (filter.owner && order.owner !== filter.owner)
+            continue
+        if (filter.pair && filter.pair !== toPair(order.selling, order.buying))
+            continue
+        res.push(order)
+        if (res.length >= filter.limit)
+            break
+    }
+    return res
 }
 
 module.exports = InMemoryHistoryStorage

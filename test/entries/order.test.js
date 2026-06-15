@@ -51,3 +51,50 @@ describe('Order.toJSON', () => {
         expect(parsed.status).toBe('FILLED')
     })
 })
+
+describe('Order.fromEvent', () => {
+    /**
+     * @param {Partial<OrderEvent>} overrides
+     * @return {OrderEvent}
+     */
+    function makeEvent(overrides = {}) {
+        return {
+            id: 1n,
+            action: 'created',
+            kind: 1,
+            buying: 'B',
+            selling: 'S',
+            price: 10n,
+            quote: 100n,
+            amount: 100n,
+            owner: 'OWNER',
+            expires: 0,
+            cursor: '1',
+            ts: 1_700_000_000_000,
+            ...overrides
+        }
+    }
+
+    test('created event yields an ACTIVE order and sets created timestamp', () => {
+        const order = Order.fromEvent(makeEvent({action: 'created', ts: 1_700_000_000_000}))
+        expect(order.status).toBe(Order.ORDER_STATUS.ACTIVE)
+        expect(order.created).toBe(1_700_000_000_000)
+        expect(order.updated).toBe(1_700_000_000_000)
+    })
+
+    test('updated event yields an ACTIVE order without resetting created', () => {
+        const order = Order.fromEvent(makeEvent({action: 'updated'}))
+        expect(order.status).toBe(Order.ORDER_STATUS.ACTIVE)
+        expect(order.created).toBeUndefined()
+    })
+
+    test('removed event with remaining amount is CANCELED', () => {
+        const order = Order.fromEvent(makeEvent({action: 'removed', amount: 50n}))
+        expect(order.status).toBe(Order.ORDER_STATUS.CANCELED)
+    })
+
+    test('removed event with zero amount is FILLED', () => {
+        const order = Order.fromEvent(makeEvent({action: 'removed', amount: 0n}))
+        expect(order.status).toBe(Order.ORDER_STATUS.FILLED)
+    })
+})
