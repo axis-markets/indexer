@@ -1,5 +1,6 @@
 const {toPair} = require('../utils/asset-pair')
 const Order = require('../entries/order')
+const parseHistoryEntry = require('../entries/parse-history-entry')
 const HistoryStorage = require('./history-storage')
 
 class InMemoryHistoryStorage extends HistoryStorage {
@@ -66,11 +67,13 @@ class InMemoryHistoryStorage extends HistoryStorage {
             const trade = trades[i]
             if (filter.cursor && trade.id > filter.cursor)
                 continue
-            if (filter.trader && trade.taker !== filter.trader && trade.maker !== filter.trader)
+            //swaps expose `trader`; trades expose `taker`/`maker`
+            if (filter.trader && trade.taker !== filter.trader && trade.maker !== filter.trader && trade.trader !== filter.trader)
                 continue
             if (filter.pair && filter.pair !== toPair(trade.soldAsset, trade.boughtAsset))
                 continue
-            res.push(trade)
+            //reconstruct the typed entry (Trade or Swap) from the persisted record's type
+            res.push(parseHistoryEntry(trade))
             if (res.length >= filter.limit)
                 break
         }

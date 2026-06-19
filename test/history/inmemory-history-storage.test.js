@@ -1,6 +1,7 @@
 const InMemoryHistoryStorage = require('../../src/history/inmemory-history-storage')
 const Order = require('../../src/entries/order')
 const Trade = require('../../src/entries/trade')
+const Swap = require('../../src/entries/swap')
 const {makeOrder} = require('../helpers/order-factory')
 
 /**
@@ -20,6 +21,23 @@ function makeTrade(overrides = {}) {
     trade.cursor = overrides.cursor ?? String(trade.id)
     trade.ts = overrides.ts ?? 1_700_000_000_000
     return trade
+}
+
+/**
+ * @param {Partial<Swap>} overrides
+ * @return {Swap}
+ */
+function makeSwap(overrides = {}) {
+    const swap = new Swap()
+    swap.id = overrides.id ?? 1n
+    swap.trader = overrides.trader ?? 'TRADER'
+    swap.soldAsset = overrides.soldAsset ?? 'S'
+    swap.boughtAsset = overrides.boughtAsset ?? 'B'
+    swap.sold = overrides.sold ?? 100n
+    swap.bought = overrides.bought ?? 200n
+    swap.cursor = overrides.cursor ?? String(swap.id)
+    swap.ts = overrides.ts ?? 1_700_000_000_000
+    return swap
 }
 
 describe('InMemoryHistoryStorage', () => {
@@ -138,5 +156,34 @@ describe('InMemoryHistoryStorage', () => {
         await storage.storeTrade(makeTrade({id: 2n, soldAsset: 'X', boughtAsset: 'Y'}))
         const trades = await storage.loadTrades({limit: 10, pair: 'S/B'})
         expect(trades.map(t => t.id)).toEqual([1n])
+    })
+
+    test('storeTrade accepts swaps; loadTrades reconstructs them as Swap with type=swap', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeTrade(makeSwap({id: 1n}), 'cursor-1')
+        const [entry] = await storage.loadTrades({limit: 10})
+        expect(entry).toBeInstanceOf(Swap)
+        expect(entry.toJSON().type).toBe('swap')
+        expect(entry.id).toBe(1n)
+    })
+
+    test('loadTrades trader filter matches a swap trader as well as trade maker/taker', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeTrade(makeTrade({id: 1n, maker: 'A', taker: 'B'}))
+        await storage.storeTrade(makeSwap({id: 2n, trader: 'A'}))
+        await storage.storeTrade(makeSwap({id: 3n, trader: 'Z'}))
+        const entries = await storage.loadTrades({limit: 10, trader: 'A'})
+        expect(entries.map(e => e.id)).toEqual([2n, 1n])
+    })
+
+    test('trades and swaps share one log, newest first, each reconstructed to its own type', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeTrade(makeTrade({id: 1n}))
+        await storage.storeTrade(makeSwap({id: 2n}))
+        await storage.storeTrade(makeTrade({id: 3n}))
+        const entries = await storage.loadTrades({limit: 10})
+        expect(entries.map(e => [e.id, e.toJSON().type])).toEqual([[3n, 'trade'], [2n, 'swap'], [1n, 'trade']])
+        expect(entries[1]).toBeInstanceOf(Swap)
+        expect(entries[0]).toBeInstanceOf(Trade)
     })
 })

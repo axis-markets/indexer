@@ -75,6 +75,7 @@ class Trade {
  */
 function serializeTrade(trade) {
     return {
+        type: 'trade',
         id: trade.id.toString(),
         order: trade.order.toString(),
         taker: trade.taker,

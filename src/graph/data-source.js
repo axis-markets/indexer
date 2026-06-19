@@ -13,6 +13,11 @@ class DataSource {
      */
     onOrderEvent
     /**
+     * Event handler invoked on multi-market swap
+     * @type {DataSourceOnSwap}
+     */
+    onSwapEvent
+    /**
      * Event handler invoked on errors
      * @type {DataSourceOnError}
      */
@@ -50,6 +55,11 @@ module.exports = DataSource
  */
 
 /**
+ * @callback DataSourceOnSwap
+ * @param {SwapEvent} swapEvent
+ */
+
+/**
  * @callback DataSourceOnError
  * @param {Error} error
  */
@@ -66,6 +76,18 @@ module.exports = DataSource
  * @property {bigint} amount - Selling amount left
  * @property {string} owner - Maker address
  * @property {number} [expires=0] - Expiration timestamp, in UNIX milliseconds
+ * @property {string} cursor - Data pagination cursor
+ * @property {number} ts - Event date
+ */
+
+/**
+ * @typedef {Object} SwapEvent AXIS multi-market swap event
+ * @property {bigint} id - Unique swap ID
+ * @property {string} trader - Trader account address
+ * @property {string} soldAsset - Sold token address
+ * @property {string} boughtAsset - Bought token address
+ * @property {bigint} sold - Sold tokens amount
+ * @property {bigint} bought - Bought tokens amount
  * @property {string} cursor - Data pagination cursor
  * @property {number} ts - Event date
  */

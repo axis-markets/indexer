@@ -21,6 +21,7 @@ describe('Trade.toJSON', () => {
         const trade = makeTrade({id: 7n, order: 99n, sold: 100n, bought: 250n})
         const json = trade.toJSON()
         expect(json).toMatchObject({
+            type: 'trade',
             id: '7',
             order: '99',
             taker: 'TAKER',
@@ -43,5 +44,24 @@ describe('Trade.toJSON', () => {
         const trade = makeTrade({id: 3n})
         const parsed = JSON.parse(JSON.stringify(trade))
         expect(parsed.id).toBe('3')
+    })
+})
+
+describe('Trade.fromEvent asset orientation', () => {
+    //Regression guard: the indexer derives asset fields from the event *payload*
+    //(soldAsset/boughtAsset), never from event topics. The orderbook contract once
+    //emitted TradeEvent topics in reversed (buying, selling) order; this pins the
+    //entity-boundary semantics so a future data-source refactor that reads topics
+    //instead of the payload can't silently swap the sold/bought assets.
+    test('maps soldAsset/boughtAsset straight from the payload, not reversed', () => {
+        const trade = Trade.fromEvent({
+            id: 1n, order: 10n, taker: 'TK', maker: 'MK',
+            soldAsset: 'SOLD', boughtAsset: 'BOUGHT',
+            sold: 100n, bought: 250n, cursor: '1', ts: 1_700_000_000
+        })
+        expect(trade.soldAsset).toBe('SOLD')
+        expect(trade.boughtAsset).toBe('BOUGHT')
+        //price is bought/sold-oriented; an asset/amount swap would invert it
+        expect(trade.toJSON().price).toBe(2.5)
     })
 })

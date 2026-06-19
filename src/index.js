@@ -1,5 +1,6 @@
 const Order = require('./entries/order')
 const Trade = require('./entries/trade')
+const Swap = require('./entries/swap')
 const HistoryStorage = require('./history/history-storage')
 const InMemoryHistoryStorage = require('./history/inmemory-history-storage')
 const DataSource = require('./graph/data-source')
@@ -76,6 +77,11 @@ class Indexer {
             this.historyStorage.storeTrade(Trade.fromEvent(trade), trade.cursor)
                 .catch(e => console.error(e))
         }
+        //swaps are stored in the same history log as trades, tagged with type='swap'
+        this.dataSource.onSwapEvent = swap => {
+            this.historyStorage.storeTrade(Swap.fromEvent(swap), swap.cursor)
+                .catch(e => console.error(e))
+        }
         this.dataSource.onOrderEvent = orderEvent => {
             const order = Order.fromEvent(orderEvent)
             this.dispatcher.update(orderEvent.action, order)
@@ -104,5 +110,6 @@ module.exports = {
     InMemoryHistoryStorage,
     Order,
     Trade,
+    Swap,
     initApiServer
 }
