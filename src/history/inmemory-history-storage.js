@@ -7,17 +7,19 @@ class InMemoryHistoryStorage extends HistoryStorage {
     constructor() {
         super()
         this.trades = []
-        this.archivedOrders = []
+        this.archivedOrders = new Map()
         this.activeOrders = new Map()
     }
 
     /**
-     * @type {Trade[]}
+     * @type {(Trade|Swap)[]}
      * @private
      */
     trades
     /**
-     * @type {Order[]}
+     * Finalized orders in archival order keyed by `id:position` (the same id may appear several times - ids are
+     * reusable)
+     * @type {Map<string,Order>}
      * @private
      */
     archivedOrders
@@ -26,6 +28,11 @@ class InMemoryHistoryStorage extends HistoryStorage {
      * @private
      */
     activeOrders
+    /**
+     * @type {{frozen: boolean, config?: ContractConfig, markets: ContractMarket[]}|undefined}
+     * @private
+     */
+    contractState
     /**
      * @type {string}
      * @private
@@ -40,19 +47,37 @@ class InMemoryHistoryStorage extends HistoryStorage {
 
     /** @inheritDoc */
     async storeOrder(order, cursor) {
-        if (order.status === Order.ORDER_STATUS.ACTIVE){
+        //records are upserted by (id, position): a revived expired order moves back to the active set
+        const key = recordKey(order)
+        this.archivedOrders.delete(key)
+        if (order.status === Order.ORDER_STATUS.ACTIVE) {
             this.activeOrders.set(order.id, order)
         } else {
-            this.activeOrders.delete(order.id)
-            this.archivedOrders.push(order)
+            //ids are reusable - evict the active record only if it is the same order (same creation position)
+            const active = this.activeOrders.get(order.id)
+            if (active && (active === order || active.position === order.position)) {
+                this.activeOrders.delete(order.id)
+            }
+            this.archivedOrders.set(key, order)
         }
         this.cursor = cursor
     }
-    /*
-    async save(cursor) {
 
-        //await fs.writeFile(this.filePath, JSON.stringify(this.storage))
-    }*/
+    /** @inheritDoc */
+    async storeContractState(state, cursor) {
+        this.contractState = state
+        this.cursor = cursor
+    }
+
+    /** @inheritDoc */
+    async loadContractState() {
+        return this.contractState
+    }
+
+    /** @inheritDoc */
+    async storeCursor(cursor) {
+        this.cursor = cursor
+    }
 
     /** @inheritDoc */
     async getCursor() {
@@ -65,7 +90,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
         const {trades} = this
         for (let i = trades.length - 1; i >= 0; i--) {
             const trade = trades[i]
-            if (filter.cursor && trade.id > filter.cursor)
+            if (filter.cursor && trade.id >= filter.cursor)
                 continue
             //swaps expose `trader`; trades expose `taker`/`maker`
             if (filter.trader && trade.taker !== filter.trader && trade.maker !== filter.trader && trade.trader !== filter.trader)
@@ -82,7 +107,7 @@ class InMemoryHistoryStorage extends HistoryStorage {
 
     /** @inheritDoc */
     async loadArchivedOrders(filter) {
-        return filterOrders(this.archivedOrders, filter)
+        return filterOrders(this.archivedOrders.values(), filter)
     }
 
     /** @inheritDoc */
@@ -95,15 +120,23 @@ class InMemoryHistoryStorage extends HistoryStorage {
     }
 }
 
+/**
+ * Newest-first scan with the exclusive `position` cursor
+ * @param {Order[]|Iterator<Order>} orders
+ * @param {{limit: number, [owner]: string, [pair]: string, [status]: number, [cursor]: bigint}} filter
+ * @return {Order[]}
+ */
 function filterOrders(orders, filter) {
     //accept both arrays and Map iterators (active orders are stored in a Map)
     const list = Array.isArray(orders) ? orders : [...orders]
     const res = []
     for (let i = list.length - 1; i >= 0; i--) {
         const order = list[i]
-        if (filter.cursor && order.id > filter.cursor)
+        if (filter.cursor && order.position >= filter.cursor)
             continue
         if (filter.owner && order.owner !== filter.owner)
+            continue
+        if (filter.status !== undefined && order.status !== filter.status)
             continue
         if (filter.pair && filter.pair !== toPair(order.selling, order.buying))
             continue
@@ -112,6 +145,14 @@ function filterOrders(orders, filter) {
             break
     }
     return res
+}
+
+/**
+ * @param {Order} order
+ * @return {string}
+ */
+function recordKey(order) {
+    return order.id + ':' + order.position
 }
 
 module.exports = InMemoryHistoryStorage

@@ -4,7 +4,13 @@ const {formatDateUTC} = require('../utils/date')
 /** On-chain multi-market swap event */
 class Swap {
     /**
-     * Unique swap ID (last trade id assigned while settling the swap legs)
+     * Record type discriminator
+     * @type {'swap'}
+     * @readonly
+     */
+    type = 'swap'
+    /**
+     * Unique swap ID (event position derived from ledger, transaction and event index)
      * @type {bigint}
      */
     id
@@ -34,6 +40,11 @@ class Swap {
      */
     bought
     /**
+     * Ledger sequence
+     * @type {number}
+     */
+    ledger
+    /**
      * Data pagination cursor
      * @type {string}
      */
@@ -49,12 +60,20 @@ class Swap {
     }
 
     /**
-     * @param {{}} swapEvent
+     * @param {SwapEvent} swapEvent
      * @return {Swap}
      */
     static fromEvent(swapEvent) {
         const swap = new Swap()
-        Object.assign(swap, swapEvent) //fields are identical, just create typed object
+        swap.id = swapEvent.id ?? swapEvent.position
+        swap.trader = swapEvent.trader
+        swap.soldAsset = swapEvent.soldAsset
+        swap.boughtAsset = swapEvent.boughtAsset
+        swap.sold = swapEvent.sold
+        swap.bought = swapEvent.bought
+        swap.ledger = swapEvent.ledger
+        swap.cursor = swapEvent.cursor
+        swap.ts = swapEvent.ts
         return swap
     }
 }
@@ -73,7 +92,7 @@ function serializeSwap(swap) {
         sold: swap.sold.toString(),
         bought: swap.bought.toString(),
         price: approximatePrice(swap.bought, swap.sold),
-        cursor: swap.cursor,
+        cursor: swap.id.toString(),
         timestamp: formatDateUTC(swap.ts)
     }
 }

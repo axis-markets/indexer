@@ -3,7 +3,7 @@ const {formatDateUTC} = require('../utils/date')
 
 class Order {
     /**
-     * Unique ID
+     * Unique ID (u128 derived by the contract from the owner and a client nonce)
      * @type {bigint}
      */
     id
@@ -12,11 +12,6 @@ class Order {
      * @type {Order.ORDER_STATUS}
      */
     status
-    /**
-     * Order type
-     * @type {Order.ORDER_KIND}
-     */
-    kind
     /**
      * Buying token address
      * @type {string}
@@ -28,14 +23,10 @@ class Order {
      */
     selling
     /**
+     * Order price (buying per 1 selling, 18 decimals)
      * @type {bigint}
      */
     price
-    /**
-     * Stop price for stop-limit orders
-     * @type {bigint}
-     */
-    stop
     /**
      * Initial selling amount
      * @type {bigint}
@@ -47,20 +38,15 @@ class Order {
      */
     amount
     /**
-     * Visible portion amount for iceberg orders
-     * @type {bigint}
-     */
-    iceberg
-    /**
      * Maker address
      * @type {string}
      */
     owner
     /**
-     * Expiration timestamp, in UNIX milliseconds
+     * Expiration timestamp, UNIX seconds (0 = no expiration)
      * @type {number}
      */
-    expires
+    expires = 0
     /**
      * Creation timestamp
      * @type {number}
@@ -71,78 +57,112 @@ class Order {
      * @type {number}
      */
     updated
-
     /**
-     * Check whether an asset can be trade with the current order
-     * @param {string} assetToTrade
-     * @deprecated
+     * Creation event ordinal, used for ordering and pagination (ids are hashes and may be reused)
+     * @type {bigint}
      */
-    canTradeWithAsset(assetToTrade) {
-        //can't trade against this order, no matching asset
-        if (this.buying !== assetToTrade && this.selling !== assetToTrade)
-            return false//throw new Error(`Attempt to trade ${assetToTrade} asset to the order ${this.toString()}`)
-        return true
-    }
+    position
+    /**
+     * Creation event data source cursor
+     * @type {string}
+     */
+    cursor
 
     toString() {
         return `[${this.id}] ${this.buying}/${this.selling} price ${this.price} amount ${this.amount}`
     }
 
-    toJSON() {
-        return serializeOrder(this)
+    /**
+     * @param {BackingView} [backing] - Maker backing in the selling asset
+     * @param {bigint} [backed] - Share of the maker budget allocated to the order (defaults to min(budget, amount))
+     */
+    toJSON(backing, backed) {
+        return serializeOrder(this, backing, backed)
     }
 
-    static ORDER_KIND = {
-        LIMIT: 1
+    /**
+     * Apply a fill: the contract reports the amount left after the trade
+     * @param {bigint} left - Amount left after the fill
+     * @param {number} ts - Fill timestamp
+     */
+    applyFill(left, ts) {
+        this.amount = left
+        this.updated = ts
+        if (left <= 0n) {
+            this.status = Order.ORDER_STATUS.FILLED
+        }
+    }
+
+    /**
+     * Apply a `mod` event: new price, amount and expiration (reviving an expired order), or removal when the amount
+     * is zero (a removal keeps the last amount, price and expiration)
+     * @param {bigint} price - New price
+     * @param {bigint} amount - New amount (0 = removed by the owner)
+     * @param {number} expires - New expiration timestamp, UNIX seconds (0 = no expiration)
+     * @param {number} ts - Event timestamp
+     */
+    applyMod(price, amount, expires, ts) {
+        this.updated = ts
+        if (amount <= 0n) {
+            this.status = Order.ORDER_STATUS.CANCELED
+            return
+        }
+        this.status = Order.ORDER_STATUS.ACTIVE
+        this.price = price
+        this.amount = amount
+        this.expires = expires || 0
+    }
+
+    /**
+     * Mark the order expired (the contract emits nothing when an order expires). The order is archived, though its
+     * entry stays on-chain: the owner may still remove or revive it, and a new order may take its id
+     */
+    applyExpiration() {
+        this.status = Order.ORDER_STATUS.EXPIRED
+        if (this.expires > 0) {
+            this.updated = this.expires
+        }
+    }
+
+    /**
+     * Whether the order has expired: the contract no longer fills it, but keeps its entry until the owner removes or
+     * revives it, or a new order reuses the id
+     * @param {number} now - Current timestamp, UNIX seconds
+     * @return {boolean}
+     */
+    isExpired(now) {
+        return this.expires > 0 && this.expires <= now
     }
 
     static ORDER_STATUS = {
         ACTIVE: 0,
         FILLED: 1,
-        CANCELED: 2
+        CANCELED: 2,
+        EXPIRED: 3
     }
 
     /**
+     * Build an active order from the `new` contract event
      * @param {OrderEvent} orderEvent
      * @return {Order}
      */
-    static fromEvent(orderEvent) {
+    static fromCreatedEvent(orderEvent) {
         const order = new Order()
         order.id = orderEvent.id
-        order.kind = ORDER_KIND_MAP[orderEvent.kind]
         order.buying = orderEvent.buying
         order.selling = orderEvent.selling
         order.amount = orderEvent.amount
-        order.quote = orderEvent.quote
+        order.quote = orderEvent.amount
         order.price = orderEvent.price
         order.owner = orderEvent.owner
-        if (orderEvent.action === 'created') {
-            order.created = orderEvent.ts
-        }
+        order.expires = orderEvent.expires || 0
+        order.status = Order.ORDER_STATUS.ACTIVE
+        order.created = orderEvent.ts
         order.updated = orderEvent.ts
-        order.expires = orderEvent.expires
-        if (orderEvent.action === 'removed') {
-            if (orderEvent.amount > 0n) {
-                order.status = Order.ORDER_STATUS.CANCELED
-            } else {
-                order.status = Order.ORDER_STATUS.FILLED
-            }
-        } else {
-            order.status = Order.ORDER_STATUS.ACTIVE
-        }
+        order.position = orderEvent.position
+        order.cursor = orderEvent.cursor
         return order
     }
-}
-
-/**
- * Reverse order kind mapping
- * @type {{}}
- */
-const ORDER_KIND_MAP = {
-    1: 'LIMIT'/*,
-    'MARKET',
-    'STOP_LOSS',
-    'ICEBERG'*/
 }
 
 /**
@@ -152,14 +172,19 @@ const ORDER_KIND_MAP = {
 const ORDER_STATUS_MAP = {
     0: 'ACTIVE',
     1: 'FILLED',
-    2: 'CANCELED'
+    2: 'CANCELED',
+    3: 'EXPIRED'
 }
 
-function serializeOrder(order) {
+/**
+ * @param {Order} order
+ * @param {BackingView} [backing]
+ * @param {bigint} [backed]
+ */
+function serializeOrder(order, backing, backed) {
     const res = {
         id: order.id.toString(),
         status: ORDER_STATUS_MAP[order.status],
-        kind: ORDER_KIND_MAP[order.kind],
         buying: order.buying,
         selling: order.selling,
         price: order.price.toString(),
@@ -168,14 +193,26 @@ function serializeOrder(order) {
         amount: order.amount.toString(),
         owner: order.owner
     }
-    if (order.expires > 0){
+    if (backing) {
+        if (backed === undefined) {
+            backed = backing.budget < order.amount ? backing.budget : order.amount
+        }
+        res.backed = (backed < 0n ? 0n : backed).toString()
+        res.backing = {
+            balance: backing.balance.toString(),
+            allowance: backing.allowance.toString(),
+            liveUntil: backing.liveUntil,
+            authorized: backing.authorized
+        }
+        if (backing.updated) {
+            res.backing.updated = formatDateUTC(backing.updated)
+        }
+        if (backing.pending) {
+            res.backing.pending = true
+        }
+    }
+    if (order.expires > 0) {
         res.expires = formatDateUTC(order.expires)
-    }
-    if (order.iceberg > 0n) {
-        res.iceberg = order.iceberg.toString()
-    }
-    if (order.stop > 0n) {
-        res.stop = order.stop.toString()
     }
     if (order.created) {
         res.created = formatDateUTC(order.created)
@@ -183,7 +220,19 @@ function serializeOrder(order) {
     if (order.updated) {
         res.updated = formatDateUTC(order.updated)
     }
+    if (order.position !== undefined) {
+        res.cursor = order.position.toString()
+    }
     return res
 }
 
 module.exports = Order
+
+/**
+ * Backing record with the effective budget computed for the current ledger
+ * @typedef {BackingRecord} BackingView
+ * @property {bigint} budget - min(balance, allowance), zero when the allowance expired
+ * @property {number} updated - Last refresh timestamp, UNIX milliseconds
+ * @property {number} [skipped] - Last `skip` event of an order of the maker selling the asset, UNIX seconds (0 = none)
+ * @property {boolean} [pending] - A recheck confirming the latest event is still due
+ */

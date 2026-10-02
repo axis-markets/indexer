@@ -18,15 +18,34 @@ describe('OrderBookGraph', () => {
         expect(graph.allOrders.size).toBe(1)
     })
 
-    test('addOrder updates the amount in place when assets and price match', () => {
+    test('addOrder replaces the order stored under the same id and returns it', () => {
         const graph = new OrderBookGraph()
         const initial = makeOrder({id: 1n, selling: 'S', buying: 'B', price: 10n, amount: 100n})
-        graph.addOrder(initial)
-        const update = makeOrder({id: 1n, selling: 'S', buying: 'B', price: 10n, amount: 40n})
-        graph.addOrder(update)
+        expect(graph.addOrder(initial)).toBeUndefined()
+        const reused = makeOrder({id: 1n, selling: 'S', buying: 'B', price: 10n, amount: 40n, position: 9n})
+        expect(graph.addOrder(reused)).toBe(initial)
         expect(graph.allOrders.size).toBe(1)
-        expect(graph.getOrder(1n)).toBe(initial)
-        expect(graph.getOrder(1n).amount).toBe(40n)
+        expect(graph.getOrder(1n)).toBe(reused)
+        expect(graph.sellingGraph.get('B').get('S')).toEqual([reused])
+        //adding the same order again is a no-op
+        expect(graph.addOrder(reused)).toBeUndefined()
+        expect(graph.sellingGraph.get('B').get('S')).toEqual([reused])
+    })
+
+    test('expireOrders takes expired orders out of the vectors and keeps them in the index', () => {
+        const graph = new OrderBookGraph()
+        const expiring = makeOrder({id: 1n, selling: 'S', buying: 'B', expires: 100})
+        graph.addOrder(expiring)
+        graph.addOrder(makeOrder({id: 2n, selling: 'S', buying: 'B'}))
+        expect(graph.expireOrders(100)).toEqual([expiring])
+        expect(graph.isLive(1n)).toBe(false)
+        expect(graph.isLive(2n)).toBe(true)
+        expect(graph.getOrder(1n)).toBe(expiring)
+        expect(graph.sellingGraph.get('B').get('S').map(o => o.id)).toEqual([2n])
+        //an expired order can be removed or re-attached
+        expect(graph.removeOrder(1n)).toBe(true)
+        expect(graph.getOrder(1n)).toBeUndefined()
+        expect(graph.expired.size).toBe(0)
     })
 
     test('updateLastLedger advances the ledger pointer', () => {

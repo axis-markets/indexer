@@ -18,6 +18,7 @@ function makeTrade(overrides = {}) {
     trade.boughtAsset = overrides.boughtAsset ?? 'B'
     trade.sold = overrides.sold ?? 100n
     trade.bought = overrides.bought ?? 200n
+    trade.left = overrides.left ?? 0n
     trade.cursor = overrides.cursor ?? String(trade.id)
     trade.ts = overrides.ts ?? 1_700_000_000_000
     return trade
@@ -48,6 +49,9 @@ describe('InMemoryHistoryStorage', () => {
         expect(await storage.getCursor()).toBe('cursor-1')
         await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.FILLED}), 'cursor-2')
         expect(await storage.getCursor()).toBe('cursor-2')
+        //the progress past a ledger without events
+        await storage.storeCursor('cursor-3')
+        expect(await storage.getCursor()).toBe('cursor-3')
     })
 
     test('storeTrade appends to the in-memory log', async () => {
@@ -83,8 +87,8 @@ describe('InMemoryHistoryStorage', () => {
         await storage.storeOrder(makeOrder({id: 2n, owner: 'Y', selling: 'S', buying: 'B', status: Order.ORDER_STATUS.ACTIVE}))
         await storage.storeOrder(makeOrder({id: 3n, owner: 'X', selling: 'X', buying: 'Y', status: Order.ORDER_STATUS.ACTIVE}))
         expect((await storage.loadActiveOrders({limit: 10, owner: 'X'})).map(o => o.id)).toEqual([3n, 1n])
-        expect((await storage.loadActiveOrders({limit: 10, pair: 'S/B'})).map(o => o.id)).toEqual([2n, 1n])
-        expect((await storage.loadActiveOrders({limit: 10, cursor: 2n})).map(o => o.id)).toEqual([2n, 1n])
+        expect((await storage.loadActiveOrders({limit: 10, pair: 'B/S'})).map(o => o.id)).toEqual([2n, 1n])
+        expect((await storage.loadActiveOrders({limit: 10, cursor: 2n})).map(o => o.id)).toEqual([1n])
     })
 
     test('storeOrder accepts a finalized order', async () => {
@@ -115,13 +119,13 @@ describe('InMemoryHistoryStorage', () => {
         expect(trades.map(t => t.id)).toEqual([2n, 1n])
     })
 
-    test('loadTrades skips trades with id greater than the cursor', async () => {
+    test('loadTrades skips trades at or after the cursor (exclusive)', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n}))
         await storage.storeTrade(makeTrade({id: 2n}))
         await storage.storeTrade(makeTrade({id: 3n}))
         const trades = await storage.loadTrades({limit: 10, cursor: 2n})
-        expect(trades.map(t => t.id)).toEqual([2n, 1n])
+        expect(trades.map(t => t.id)).toEqual([1n])
     })
 
     test('loadArchivedOrders filters by owner', async () => {
@@ -133,20 +137,20 @@ describe('InMemoryHistoryStorage', () => {
         expect(orders.map(o => o.id)).toEqual([3n, 1n])
     })
 
-    test('loadArchivedOrders honors cursor', async () => {
+    test('loadArchivedOrders honors the exclusive position cursor', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeOrder(makeOrder({id: 1n, status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 2n, status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 3n, status: Order.ORDER_STATUS.FILLED}))
         const orders = await storage.loadArchivedOrders({limit: 10, cursor: 2n})
-        expect(orders.map(o => o.id)).toEqual([2n, 1n])
+        expect(orders.map(o => o.id)).toEqual([1n])
     })
 
-    test('loadArchivedOrders filters by pair (matched against toPair(selling, buying))', async () => {
+    test('loadArchivedOrders filters by pair (matched against the canonical toPair(selling, buying))', async () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeOrder(makeOrder({id: 1n, selling: 'S', buying: 'B', status: Order.ORDER_STATUS.FILLED}))
         await storage.storeOrder(makeOrder({id: 2n, selling: 'X', buying: 'Y', status: Order.ORDER_STATUS.FILLED}))
-        const orders = await storage.loadArchivedOrders({limit: 10, pair: 'S/B'})
+        const orders = await storage.loadArchivedOrders({limit: 10, pair: 'B/S'})
         expect(orders.map(o => o.id)).toEqual([1n])
     })
 
@@ -154,7 +158,7 @@ describe('InMemoryHistoryStorage', () => {
         const storage = new InMemoryHistoryStorage()
         await storage.storeTrade(makeTrade({id: 1n, soldAsset: 'S', boughtAsset: 'B'}))
         await storage.storeTrade(makeTrade({id: 2n, soldAsset: 'X', boughtAsset: 'Y'}))
-        const trades = await storage.loadTrades({limit: 10, pair: 'S/B'})
+        const trades = await storage.loadTrades({limit: 10, pair: 'B/S'})
         expect(trades.map(t => t.id)).toEqual([1n])
     })
 
@@ -174,6 +178,25 @@ describe('InMemoryHistoryStorage', () => {
         await storage.storeTrade(makeSwap({id: 3n, trader: 'Z'}))
         const entries = await storage.loadTrades({limit: 10, trader: 'A'})
         expect(entries.map(e => e.id)).toEqual([2n, 1n])
+    })
+
+    test('the archive may hold several records with the same reused id, told apart by position', async () => {
+        const storage = new InMemoryHistoryStorage()
+        await storage.storeOrder(makeOrder({id: 1n, position: 10n, status: Order.ORDER_STATUS.FILLED}))
+        await storage.storeOrder(makeOrder({id: 1n, position: 20n, status: Order.ORDER_STATUS.CANCELED}))
+        const orders = await storage.loadArchivedOrders({limit: 10})
+        expect(orders.map(o => [o.id, o.position])).toEqual([[1n, 20n], [1n, 10n]])
+        expect((await storage.loadArchivedOrders({limit: 10, cursor: 20n})).map(o => o.position)).toEqual([10n])
+    })
+
+    test('archiving an order does not evict a newer active order that reuses the id', async () => {
+        const storage = new InMemoryHistoryStorage()
+        const stale = makeOrder({id: 1n, position: 10n})
+        const fresh = makeOrder({id: 1n, position: 20n})
+        await storage.storeOrder(fresh)
+        stale.status = Order.ORDER_STATUS.FILLED
+        await storage.storeOrder(stale)
+        expect((await storage.loadActiveOrders({limit: 10})).map(o => o.position)).toEqual([20n])
     })
 
     test('trades and swaps share one log, newest first, each reconstructed to its own type', async () => {

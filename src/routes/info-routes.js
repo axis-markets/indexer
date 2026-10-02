@@ -7,16 +7,14 @@ module.exports = function (app, indexer) {
         {},
         async req => {
             const res = {
-                status: 'loading',
+                status: indexer.dispatcher.ready ? 'active' : 'loading',
                 ts: formatDateUTC(new Date()),
+                ledger: indexer.dispatcher.graph.lastLedger,
+                frozen: indexer.contractState.frozen,
                 commission: {
                     maker: 0,
                     taker: 0
                 }
-            }
-            if (indexer.dispatcher.ready) {
-                res.status = 'active'
-                res.ledger = indexer.dispatcher.graph.lastLedger
             }
             return res
         })

@@ -20,4 +20,4 @@ function approximatePrice(n, d) {
     return Number(n) / Number(d)
 }
 
-module.exports = {toRationalPrice, approximatePrice}
+module.exports = {PRECISION, toRationalPrice, approximatePrice}

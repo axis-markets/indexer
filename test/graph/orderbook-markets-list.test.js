@@ -3,10 +3,10 @@ const AssetMarkets = require('../../src/graph/asset-market')
 const {makeOrder} = require('../helpers/order-factory')
 
 describe('OrderbookMarketsList', () => {
-    test('add stores pairs in canonical order (larger asset first)', () => {
+    test('add stores pairs in canonical order (contract Address order)', () => {
         const list = new OrderbookMarketsList()
         list.add('A', 'B')
-        expect(list.markets).toEqual([['B', 'A']])
+        expect(list.markets).toEqual([['A', 'B']])
     })
 
     test('add freezes each stored pair', () => {
@@ -23,19 +23,19 @@ describe('OrderbookMarketsList', () => {
         const list = new OrderbookMarketsList().loadFromMarkets([m1].values())
         expect(list.markets.length).toBe(2)
         for (const pair of list.markets) {
-            expect(pair[0] >= pair[1]).toBe(true)
+            expect(pair[0] <= pair[1]).toBe(true)
         }
     })
 
-    test('add keeps pairs sorted lexicographically', () => {
+    test('add keeps pairs sorted in canonical order', () => {
         const list = new OrderbookMarketsList()
         list.add('A', 'C')
         list.add('A', 'B')
         list.add('A', 'D')
         expect(list.markets).toEqual([
-            ['B', 'A'],
-            ['C', 'A'],
-            ['D', 'A']
+            ['A', 'B'],
+            ['A', 'C'],
+            ['A', 'D']
         ])
     })
 
@@ -44,7 +44,7 @@ describe('OrderbookMarketsList', () => {
         list.add('A', 'B')
         list.add('B', 'A')
         list.add('A', 'B')
-        expect(list.markets).toEqual([['B', 'A']])
+        expect(list.markets).toEqual([['A', 'B']])
     })
 
     test('range returns the first N entries when no cursor is supplied', () => {
@@ -54,8 +54,8 @@ describe('OrderbookMarketsList', () => {
         list.add('A', 'D')
         const page = list.range(undefined, 2)
         expect(page).toEqual([
-            ['B', 'A'],
-            ['C', 'A']
+            ['A', 'B'],
+            ['A', 'C']
         ])
     })
 
@@ -64,18 +64,18 @@ describe('OrderbookMarketsList', () => {
         list.add('A', 'B')
         list.add('A', 'C')
         list.add('A', 'D')
-        const page = list.range(['C', 'A'], 10)
-        expect(page).toEqual([['D', 'A']])
+        const page = list.range(['A', 'C'], 10)
+        expect(page).toEqual([['A', 'D']])
     })
 
     test('range with an unknown cursor falls back to the start', () => {
         const list = new OrderbookMarketsList()
         list.add('A', 'B')
         list.add('A', 'C')
-        const page = list.range(['Z', 'Y'], 10)
+        const page = list.range(['Y', 'Z'], 10)
         expect(page).toEqual([
-            ['B', 'A'],
-            ['C', 'A']
+            ['A', 'B'],
+            ['A', 'C']
         ])
     })
 

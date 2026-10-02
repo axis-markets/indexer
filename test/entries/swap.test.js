@@ -9,7 +9,7 @@ function makeSwap(overrides = {}) {
     s.boughtAsset = overrides.boughtAsset ?? 'B'
     s.sold = overrides.sold ?? 100n
     s.bought = overrides.bought ?? 200n
-    s.cursor = overrides.cursor ?? String(s.id)
+    s.cursor = overrides.cursor ?? '1-0000'
     s.ts = overrides.ts ?? 1_700_000_000
     return s
 }

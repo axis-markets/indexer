@@ -1,4 +1,4 @@
-const {StrKey} = require('@stellar/stellar-base')
+const {StrKey} = require('@stellar/stellar-sdk')
 const {normalizeLimit, isValidActor, parseIdCursor} = require('../utils/validation')
 const {toPair} = require('../utils/asset-pair')
 const stdErrors = require('../server/errors')
@@ -18,8 +18,8 @@ class HistoryDispatcher {
     historyStorage
 
     /**
-     * Load archived orders
-     * @param {{limit: number, [owner]: string, [pair]: string[], [cursor]: string}} filter
+     * Load archived orders, newest first
+     * @param {{limit: number, [owner]: string, [pair]: string[], [cursor]: string}} filter - Query filters; `cursor` is the cursor of the last order received (exclusive) - Query filters;  is the cursor of the last order received
      * @return {Promise<Order[]>}
      */
     async loadOrdersHistory(filter = {}) {
@@ -38,16 +38,12 @@ class HistoryDispatcher {
         }
         params.limit = normalizeLimit(filter.limit, 20, 500)
         const data = await this.historyStorage.loadArchivedOrders(params)
-        return data.map(order => {
-            const serialized = order.toJSON()
-            serialized.cursor = serialized.id
-            return serialized
-        })
+        return data.map(order => order.toJSON())
     }
 
     /**
-     * Load trades history
-     * @param {{limit: number, [cursor]: string, [pair]: string[], [trader]: string}} filter
+     * Load trades history, newest first
+     * @param {{limit: number, [cursor]: string, [pair]: string[], [trader]: string}} filter - Query filters; `cursor` is the id of the last trade received (exclusive)
      * @return {Promise<Trade[]>}
      */
     async loadTradesHistory(filter) {
@@ -66,11 +62,7 @@ class HistoryDispatcher {
         }
         params.limit = normalizeLimit(filter.limit, 20, 500)
         const data = await this.historyStorage.loadTrades(params)
-        return data.map(trade => {
-            const serialized = trade.toJSON()
-            serialized.cursor = serialized.id
-            return serialized
-        })
+        return data.map(trade => trade.toJSON())
     }
 }
 

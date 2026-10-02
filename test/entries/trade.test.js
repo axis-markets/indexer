@@ -11,14 +11,15 @@ function makeTrade(overrides = {}) {
     t.boughtAsset = overrides.boughtAsset ?? 'B'
     t.sold = overrides.sold ?? 100n
     t.bought = overrides.bought ?? 200n
-    t.cursor = overrides.cursor ?? String(t.id)
+    t.left = overrides.left ?? 0n
+    t.cursor = overrides.cursor ?? '1-0000'
     t.ts = overrides.ts ?? 1_700_000_000
     return t
 }
 
 describe('Trade.toJSON', () => {
     test('serializes BigInt fields as strings and includes approximate price', () => {
-        const trade = makeTrade({id: 7n, order: 99n, sold: 100n, bought: 250n})
+        const trade = makeTrade({id: 7n, order: 99n, sold: 100n, bought: 250n, left: 5n})
         const json = trade.toJSON()
         expect(json).toMatchObject({
             type: 'trade',
@@ -30,6 +31,7 @@ describe('Trade.toJSON', () => {
             boughtAsset: 'B',
             sold: '100',
             bought: '250',
+            left: '5',
             price: 2.5,
             cursor: '7'
         })
@@ -44,24 +46,31 @@ describe('Trade.toJSON', () => {
         const trade = makeTrade({id: 3n})
         const parsed = JSON.parse(JSON.stringify(trade))
         expect(parsed.id).toBe('3')
+        expect(parsed.type).toBe('trade')
     })
 })
 
-describe('Trade.fromEvent asset orientation', () => {
-    //Regression guard: the indexer derives asset fields from the event *payload*
-    //(soldAsset/boughtAsset), never from event topics. The orderbook contract once
-    //emitted TradeEvent topics in reversed (buying, selling) order; this pins the
-    //entity-boundary semantics so a future data-source refactor that reads topics
-    //instead of the payload can't silently swap the sold/bought assets.
-    test('maps soldAsset/boughtAsset straight from the payload, not reversed', () => {
+describe('Trade.fromEvent', () => {
+    test('copies the event fields and uses the event position as id', () => {
         const trade = Trade.fromEvent({
-            id: 1n, order: 10n, taker: 'TK', maker: 'MK',
+            id: 6000n, position: 6000n, ledger: 12, order: 10n, taker: 'TK', maker: 'MK',
             soldAsset: 'SOLD', boughtAsset: 'BOUGHT',
-            sold: 100n, bought: 250n, cursor: '1', ts: 1_700_000_000
+            sold: 100n, bought: 250n, left: 7n, cursor: '1-0002', ts: 1_700_000_000
         })
+        expect(trade).toBeInstanceOf(Trade)
+        expect(trade.type).toBe('trade')
+        expect(trade.id).toBe(6000n)
+        expect(trade.ledger).toBe(12)
+        expect(trade.left).toBe(7n)
+        //asset orientation comes from the payload (taker sold/bought), never reversed
         expect(trade.soldAsset).toBe('SOLD')
         expect(trade.boughtAsset).toBe('BOUGHT')
         //price is bought/sold-oriented; an asset/amount swap would invert it
         expect(trade.toJSON().price).toBe(2.5)
+    })
+
+    test('falls back to the position when the event carries no id', () => {
+        const trade = Trade.fromEvent({position: 42n, order: 1n, taker: 'T', maker: 'M', soldAsset: 'S', boughtAsset: 'B', sold: 1n, bought: 1n, left: 0n, cursor: 'c', ts: 1})
+        expect(trade.id).toBe(42n)
     })
 })

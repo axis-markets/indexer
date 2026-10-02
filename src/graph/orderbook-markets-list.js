@@ -1,3 +1,5 @@
+const {canonicalPair, compareAssets} = require('../utils/asset-pair')
+
 class OrderbookMarketsList {
     constructor() {
         this.markets = []
@@ -25,14 +27,13 @@ class OrderbookMarketsList {
     }
 
     /**
-     * Insert a pair maintaining sorted order; duplicates are ignored
+     * Insert a pair in the contract canonical order (`[a, b]`, see `canonicalPair`), keeping the list sorted; duplicates
+     * are ignored
      * @param {string} sellingAsset
      * @param {string} buyingAsset
      */
     add(sellingAsset, buyingAsset) {
-        const pair = sellingAsset.localeCompare(buyingAsset) > 0 ?
-            [sellingAsset, buyingAsset] :
-            [buyingAsset, sellingAsset]
+        const pair = canonicalPair(sellingAsset, buyingAsset)
         Object.freeze(pair)
         for (let i = 0; i < this.markets.length; i++) {
             const cmp = comparePairs(this.markets[i], pair)
@@ -77,10 +78,7 @@ class OrderbookMarketsList {
  * @return {number}
  */
 function comparePairs(a, b) {
-    const cmp = a[0].localeCompare(b[0])
-    if (cmp !== 0)
-        return cmp
-    return a[1].localeCompare(b[1])
+    return compareAssets(a[0], b[0]) || compareAssets(a[1], b[1])
 }
 
 module.exports = OrderbookMarketsList

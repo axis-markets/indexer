@@ -1,4 +1,4 @@
-const {StrKey} = require('@stellar/stellar-base')
+const {StrKey} = require('@stellar/stellar-sdk')
 const stdErrors = require('../server/errors')
 
 /**
@@ -33,14 +33,14 @@ function isValidActor(actor) {
 }
 
 /**
- * Parse cursor ID from request
+ * Parse cursor ID from request (order ids and event positions are non-negative integers)
  * @param {string|bigint} cursor
  * @return {bigint}
  */
 function parseIdCursor(cursor) {
     try {
         const id = BigInt(cursor)
-        if (id <= 0n)
+        if (id < 0n)
             throw new Error('Invalid ID')
         return id
     } catch (e) {

@@ -1,4 +1,4 @@
-const {Keypair, StrKey} = require('@stellar/stellar-base')
+const {Keypair, StrKey} = require('@stellar/stellar-sdk')
 const {normalizeLimit, isValidActor, parseIdCursor} = require('../../src/utils/validation')
 
 describe('normalizeLimit', () => {
@@ -68,8 +68,8 @@ describe('parseIdCursor', () => {
         expect(parseIdCursor(7n)).toBe(7n)
     })
 
-    test('rejects zero', () => {
-        expect(() => parseIdCursor('0')).toThrow(/Invalid parameter: "cursor"/)
+    test('accepts zero (ids and positions are non-negative)', () => {
+        expect(parseIdCursor('0')).toBe(0n)
     })
 
     test('rejects negative values', () => {

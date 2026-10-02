@@ -1,7 +1,6 @@
 {
   "name": "@axis-markets/indexer",
-  "version": "0.3.2",
-  "private": true,
+  "version": "0.4.0",
   "description": "Service that scans AXIS events and maintains current orderbook state in memory",
   "main": "src/index.js",
   "author": "team@stellar.expert",
@@ -9,21 +8,23 @@
     "url": "https://github.com/axis-markets/indexer.git"
   },
   "scripts": {
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "start": "node src/index.js"
   },
   "dependencies": {
-    "@stellar/stellar-base": "15.0.0",
-    "@stellar/stellar-sdk": "15.1.0",
-    "body-parser": "2.2.2",
+    "@stellar/stellar-sdk": "17.2.1",
+    "body-parser": "2.3.0",
     "cors": "2.8.6",
     "express": "5.2.1"
   },
   "devDependencies": {
-    "jest": "30.4.2"
+    "jest": "30.5.2"
   },
   "jest": {
     "clearMocks": true,
     "maxWorkers": 1
-  }
+  },
+  "files": [
+    "src/"
+  ]
 }
