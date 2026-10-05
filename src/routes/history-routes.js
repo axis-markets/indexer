@@ -16,4 +16,9 @@ module.exports = function (app, indexer) {
     registerRoute(app,
         '/trades', {},
         async req => await dispatcher.loadTradesHistory(req.query))
+
+    //failed AXIS transactions (diagnostics only, never attributed to a party)
+    registerRoute(app,
+        '/failures', {},
+        async req => await dispatcher.loadFailures(req.query))
 }

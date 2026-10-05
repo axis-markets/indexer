@@ -1,6 +1,6 @@
 {
   "name": "@axis-markets/indexer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Service that scans AXIS events and maintains current orderbook state in memory",
   "main": "src/index.js",
   "author": "team@stellar.expert",

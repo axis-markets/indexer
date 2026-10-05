@@ -125,8 +125,10 @@ class OrderBookDispatcher {
 
     /**
      * Apply a `skip` event: the listed order was left unchanged because its maker could not settle the fill (backing
-     * short of it, cannot receive the taker's asset, or the transfer failed). The maker's backing is reloaded and the
-     * skip is recorded on the backing of the asset the order sells, so routers can stop proposing the maker
+     * short of it, a missing or deauthorized trustline for the taker's asset, or the maker's asset could not be
+     * collected). For `crossfill` the skipped order may be the taker order, whose owner could not back it or be paid.
+     * Either way the order owner is the party at fault, never the caller. The owner's backing is reloaded and the skip
+     * is recorded on the backing of the asset the order sells, so routers can stop proposing the owner
      * @param {bigint} orderId - Skipped order id
      * @param {number} ts - Event timestamp
      * @return {Order|undefined} - Skipped order, undefined if the order is unknown
@@ -174,7 +176,8 @@ class OrderBookDispatcher {
     }
 
     /**
-     * Track the maker backing in both order assets (selling side funds the order, buying side must be receivable)
+     * Track the maker backing in both order assets (selling side funds the order, buying side must be receivable and
+     * have room for the payment)
      * @param {Order} order
      * @private
      */
@@ -326,6 +329,9 @@ class OrderBookDispatcher {
             budget: backing.budget.toString(),
             updated: backing.updated ? formatDateUTC(backing.updated) : undefined,
             skipped: backing.skipped ? formatDateUTC(backing.skipped) : undefined
+        }
+        if (backing.headroom !== undefined) {
+            res.headroom = backing.headroom.toString()
         }
         if (backing.pending) {
             res.pending = true

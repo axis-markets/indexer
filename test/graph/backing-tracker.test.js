@@ -269,6 +269,11 @@ describe('BackingTracker change notifications', () => {
         loader.respond(OWNER, ASSET, record({allowance: 50n}))
         await tracker.refresh(OWNER, ASSET)
         expect(onChange).toHaveBeenCalledTimes(2)
+        //the receive headroom of a trustline is part of the record
+        loader.respond(OWNER, ASSET, record({allowance: 50n, headroom: 300n}))
+        await tracker.refresh(OWNER, ASSET)
+        expect(onChange).toHaveBeenCalledTimes(3)
+        expect(tracker.describe(OWNER, ASSET).headroom).toBe(300n)
         tracker.stop()
     })
 

@@ -79,6 +79,27 @@ class HistoryStorage {
     }
 
     /**
+     * Store a failed AXIS transaction (diagnostics only). Storages that do not keep failures ignore them. A failure
+     * replayed after a restart is stored once (records are unique by `id`)
+     * @param {Failure} failure
+     * @return {Promise<void>}
+     * @virtual
+     */
+    async storeFailure(failure) {
+    }
+
+    /**
+     * Load failed AXIS transactions, newest first
+     * @param {{limit: number, [account]: string, [fn]: string, [cursor]: bigint}} filter - Query filters; `account`
+     *   matches the caller and the parties of the failed transfer; `cursor` is the id of the last record received (exclusive)
+     * @return {Promise<Failure[]>}
+     * @virtual
+     */
+    async loadFailures(filter) {
+        return []
+    }
+
+    /**
      * Load active orders, newest first
      * @param {{limit: number, [owner]: string, [pair]: string, [cursor]: bigint}} filter - Query filters; `cursor` is the creation position of the last order received (exclusive)
      * @return {Promise<Order[]>}

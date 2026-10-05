@@ -43,6 +43,12 @@ class DataSource {
      */
     onConfigEvent
     /**
+     * Event handler invoked when a transaction calling the AXIS contract failed (optional: only data sources that see
+     * failed transactions report them). A failed call changes no state: it is recorded for diagnostics only
+     * @type {DataSourceOnFailure}
+     */
+    onFailureEvent
+    /**
      * Event handler invoked on errors
      * @type {DataSourceOnError}
      */
@@ -158,6 +164,11 @@ module.exports = DataSource
  */
 
 /**
+ * @callback DataSourceOnFailure
+ * @param {FailureEvent} failureEvent
+ */
+
+/**
  * @callback DataSourceOnBacking
  * @param {BackingEvent} backingEvent
  */
@@ -209,6 +220,9 @@ module.exports = DataSource
  * @property {bigint} sold - Sold tokens amount
  * @property {bigint} bought - Bought tokens amount
  * @property {bigint} left - Maker order amount left after the fill (0 = removed)
+ * @property {string} [fn] - AXIS function whose call emitted the event, when the data source reads the call tree
+ * @property {boolean} [crossfill] - Whether this is the fill of a `crossfill` taker order, when the data source knows it
+ *   from the call tree (the indexer recognizes the event pattern otherwise)
  */
 
 /**
@@ -223,9 +237,11 @@ module.exports = DataSource
  */
 
 /**
- * AXIS `skip` event: a listed order was not executed because its maker could not settle the fill (backing short of
- * it, cannot receive the taker's asset, or the transfer failed); the order is left unchanged. For `crossfill` it also
- * flags a taker order its owner cannot back or be paid for
+ * AXIS `skip` event: a listed order was not executed because its maker could not settle the fill: the backing left does
+ * not cover it, the maker cannot receive the taker's asset (missing or deauthorized trustline), or the maker's asset
+ * could not be collected. The order is left unchanged. For `crossfill` it also flags a taker order its owner cannot back
+ * or be paid for. It is the only signal pointing at a party (the order owner): a payment the maker cannot be credited
+ * with, or a taker who cannot pay or receive, fails the whole call instead and emits nothing
  * @typedef {ContractEventBase} SkipEvent
  * @property {bigint} order - Skipped order id
  */
@@ -233,8 +249,8 @@ module.exports = DataSource
 /**
  * AXIS `refresh` event: a market was checked against the price oracle (`requote`, `subsidize`, market creation)
  * @typedef {ContractEventBase} MarketRefreshEvent
- * @property {string} a - First market asset (canonical order)
- * @property {string} b - Second market asset (canonical order)
+ * @property {string} base - Base market asset, the first of the pair in canonical order
+ * @property {string} quote - Quote market asset, the second of the pair in canonical order
  */
 
 /**
@@ -244,21 +260,52 @@ module.exports = DataSource
  */
 
 /**
- * AXIS `config` event: the configuration set by the constructor, `delegate`, `set_oracle` or `set_floor`
+ * AXIS `config` event: the configuration set by the constructor, `delegate`, `set_oracle`, `set_floor`,
+ * `set_listing_min_days` or `set_ledger_time`
  * @typedef {ContractEventBase} ConfigEvent
- * @property {string} safetyAdmin - Account allowed to freeze the contract and change its settings
+ * @property {string} safetyAdmin - Account allowed to freeze the contract and change its configuration
  * @property {string} oracle - Price oracle contract address
- * @property {bigint} marketListingFee - Fee token amount burned to open a market
+ * @property {number} listingMinDays - Days of price feeds a new market must buy (0 opens markets without a fee)
+ * @property {bigint} marketListingFee - Oracle fee tokens a market creator pays to provision the price feeds (the
+ *   oracle daily fee times `listingMinDays`)
  * @property {bigint} minTradeSize - Minimum trade value in USD with 7 decimals (0 = disabled)
+ * @property {number} ledgerTime - Expected ledger close time in seconds, used to convert entry lifetimes into ledgers
+ */
+
+/**
+ * A failed AXIS call (reported by data sources that see failed calls): the transaction failed, or a calling contract
+ * caught the failure. The failure is described, never attributed: a failed payment to a maker fails the whole call
+ * with the token's own error whether the payer could not pay or the maker could not be credited
+ * @typedef {Object} FailureEvent
+ * @property {bigint} position - Ordinal of the failure: the position of its transaction (ledger and application order,
+ *   as for events) plus the index of the failed call within it
+ * @property {number} ledger - Ledger sequence
+ * @property {number} ts - Ledger close time, UNIX seconds
+ * @property {string} txHash - Transaction hash
+ * @property {string} fn - Contract function called (`trade`, `swap`, `crossfill`, `update`, ...)
+ * @property {string} caller - Address authorizing the call (`trader` or `sponsor` argument), the transaction source
+ *   otherwise (also for a call made through another contract)
+ * @property {bigint[]} orders - Maker order ids listed by the call
+ * @property {bigint} [takerOrder] - Taker order id of a `crossfill`
+ * @property {string} result - Operation (or transaction) result code
+ * @property {boolean} [caught] - The transaction succeeded: a calling contract caught the failed AXIS call
+ * @property {'contract'|'transfer'|'resources'|'auth'|'unknown'} reason - `contract`: an AXIS error (see `error`),
+ *   `transfer`: a token transfer failed (see `transfer`, either party may be at fault), `resources`: a resource limit,
+ *   the refundable fee or an archived entry, `auth`: an authorization failure, `unknown`: no diagnostic events
+ * @property {{contract: string, code: number, name?: string}} [error] - Contract error that failed the call
+ * @property {{token: string, fn: string, from: string, to: string, amount: bigint}} [transfer] - Token transfer that
+ *   failed (`transfer` or `transfer_from`), when diagnostic events show it
  */
 
 /**
  * Backing of an account in a token
  * @typedef {Object} BackingRecord
- * @property {bigint} balance - Token balance
+ * @property {bigint} balance - Token balance (spendable)
  * @property {boolean} authorized - Whether the account can send/receive the token (authorized trustline or balance entry)
  * @property {bigint} allowance - Allowance granted to the AXIS contract
  * @property {number} liveUntil - Ledger sequence the allowance lives until (0 when there is no allowance)
+ * @property {bigint} [headroom] - Amount the account can still receive (trustline limit minus balance and buying
+ *   liabilities), undefined when unlimited or unknown
  */
 
 /**

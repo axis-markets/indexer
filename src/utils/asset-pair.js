@@ -46,24 +46,24 @@ function compareAssets(x, y) {
 }
 
 /**
- * Order an asset pair canonically, as the contract stores markets: `a` goes first
+ * Order an asset pair canonically, as the contract stores markets: the base asset goes first
  * @param {string} x
  * @param {string} y
- * @return {[string, string]} - `[a, b]`
+ * @return {[string, string]} - `[base, quote]`
  */
 function canonicalPair(x, y) {
     return compareAssets(x, y) <= 0 ? [x, y] : [y, x]
 }
 
 /**
- * Get standard asset pair representation `a/b` (contract canonical order; `a` is the base, `b` the quote)
+ * Get standard asset pair representation `base/quote` (contract canonical order)
  * @param {string} asset1
  * @param {string} asset2
  * @return {string}
  */
 function toPair(asset1, asset2) {
-    const [a, b] = canonicalPair(asset1, asset2)
-    return `${a}/${b}`
+    const [base, quote] = canonicalPair(asset1, asset2)
+    return `${base}/${quote}`
 }
 
 module.exports = {toPair, canonicalPair, compareAssets}

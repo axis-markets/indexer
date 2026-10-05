@@ -233,19 +233,128 @@ describe('Indexer event processing', () => {
     })
 
     test('freeze, config and refresh events update and persist the contract state', async () => {
-        ctx.dataSource.onConfigEvent({safetyAdmin: MAKER, oracle: 'CORACLE', marketListingFee: 900n, minTradeSize: 10n, ...base(1n, 90)})
-        ctx.dataSource.onMarketEvent({a: EUR, b: USD, ...base(2n, 91)})
-        ctx.dataSource.onMarketEvent({a: EUR, b: USD, ...base(3n, 92)})
+        ctx.dataSource.onConfigEvent({safetyAdmin: MAKER, oracle: 'CORACLE', listingMinDays: 90, marketListingFee: 900n, minTradeSize: 10n, ledgerTime: 5, ...base(1n, 90)})
+        ctx.dataSource.onMarketEvent({base: EUR, quote: USD, ...base(2n, 91)})
+        ctx.dataSource.onMarketEvent({base: EUR, quote: USD, ...base(3n, 92)})
         ctx.dataSource.onFreezeEvent({frozen: true, ...base(4n, 93)})
         await flush()
         const state = ctx.indexer.contractState
         expect(state.frozen).toBe(true)
-        expect(state.config).toEqual({safetyAdmin: MAKER, oracle: 'CORACLE', marketListingFee: 900n, minTradeSize: 10n})
-        expect(state.getMarket(USD, EUR)).toEqual({a: EUR, b: USD, created: base(2n).ts, refreshed: base(3n).ts})
-        expect(state.toJSON()).toMatchObject({frozen: true, config: {marketListingFee: '900', minTradeSize: '10'}})
+        expect(state.config).toEqual({safetyAdmin: MAKER, oracle: 'CORACLE', listingMinDays: 90, marketListingFee: 900n, minTradeSize: 10n, ledgerTime: 5})
+        expect(state.getMarket(USD, EUR)).toEqual({base: EUR, quote: USD, created: base(2n).ts, refreshed: base(3n).ts})
+        expect(state.toJSON()).toMatchObject({
+            address: 'CAXIS',
+            frozen: true,
+            config: {listingMinDays: 90, marketListingFee: '900', minTradeSize: '10', ledgerTime: 5},
+            markets: [{base: EUR, quote: USD}]
+        })
         expect(await ctx.historyStorage.getCursor()).toBe('4-0000')
         expect(await ctx.historyStorage.loadContractState()).toEqual(state.snapshot())
         expect(ctx.indexer.dispatcher.graph.lastLedger).toBe(93)
+    })
+
+    test('a refreshed market tracks the contract record of both assets (authorization to hold them in transit)', async () => {
+        ctx.dataSource.backing.set(`CAXIS|${EUR}`, {balance: 0n, authorized: false, allowance: 0n, liveUntil: 0})
+        ctx.dataSource.onMarketEvent({base: EUR, quote: USD, ...base(2n, 91)})
+        ctx.dataSource.onMarketEvent({base: EUR, quote: USD, ...base(3n, 92)})
+        await flush()
+        expect(ctx.indexer.dispatcher.graph.contract).toBe('CAXIS')
+        expect(ctx.dataSource.loads.filter(([, owner]) => owner === 'CAXIS')).toEqual([[EUR, 'CAXIS', 'CAXIS'], [USD, 'CAXIS', 'CAXIS']])
+        expect(ctx.indexer.backing.get('CAXIS', EUR)).toMatchObject({authorized: false, refs: 1})
+    })
+
+    test('the fill of a crossfill taker order is flagged, the maker fills before it are not', async () => {
+        //the taker order sells USD for EUR, two makers sell EUR for USD
+        ctx.dataSource.onOrderEvent(created(1n, {owner: MAKER, selling: USD, buying: EUR}))
+        await flush()
+        const flagged = []
+        ctx.indexer.on('trade', trade => flagged.push([trade.id, trade.crossfill === true]))
+        const tx = 7n << 28n //same ledger and transaction for every event below
+        //maker fills: the taker order owner pays USD and gets EUR
+        ctx.dataSource.onTradeEvent({order: 20n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
+        ctx.dataSource.onTradeEvent({order: 21n, taker: MAKER, maker: 'GM2', soldAsset: USD, boughtAsset: EUR, sold: 200n, bought: 105n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
+        //the taker order fill: the caller as taker, the owner as maker, for what the owner paid
+        ctx.dataSource.onTradeEvent({order: 1n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 500n, ...base(tx | 3n, 101), id: tx | 3n})
+        await flush()
+        expect(flagged).toEqual([[tx | 1n, false], [tx | 2n, false], [tx | 3n, true]])
+        const [stored] = await ctx.historyStorage.loadTrades({limit: 1})
+        expect(stored.crossfill).toBe(true)
+        expect(stored.toJSON().crossfill).toBe(true)
+    })
+
+    test('a data source reading the call tree decides the crossfill flag, the pattern only stands in for it', async () => {
+        const flagged = []
+        ctx.indexer.on('trade', trade => flagged.push(trade.crossfill === true))
+        const tx = 11n << 28n
+        //the pattern matches (two unrelated router calls), but the call tree says it is a trade
+        ctx.dataSource.onTradeEvent({order: 40n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n, crossfill: false})
+        ctx.dataSource.onTradeEvent({order: 41n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 150n, bought: 300n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n, crossfill: false})
+        //and a crossfill fill the call tree reports is flagged whatever precedes it
+        ctx.dataSource.onTradeEvent({order: 42n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 1n, bought: 1n, left: 0n, ...base((12n << 28n) | 1n, 102), id: (12n << 28n) | 1n, crossfill: true})
+        await flush()
+        expect(flagged).toEqual([false, false, true])
+    })
+
+    test('a failed AXIS call a calling contract caught keeps its flag', async () => {
+        ctx.dataSource.onFailureEvent({position: 98n << 28n, ledger: 120, ts: 1_700_000_500, txHash: 'cd'.repeat(32), fn: 'update', caller: MAKER, orders: [], result: 'invokeHostFunctionSuccess', caught: true, reason: 'contract', error: {contract: 'CAXIS', code: 730, name: 'Frozen'}})
+        await flush()
+        const [stored] = await ctx.historyStorage.loadFailures({limit: 1})
+        expect(stored.caught).toBe(true)
+        expect(stored.toJSON()).toMatchObject({caught: true, fn: 'update', error: {name: 'Frozen'}})
+    })
+
+    test('swap hop fills and fills of separate transactions are not flagged as crossfill', async () => {
+        const flagged = []
+        ctx.indexer.on('trade', trade => flagged.push(trade.crossfill === true))
+        const tx = 8n << 28n
+        //a cyclic swap: the trader sells USD for EUR, then the contract sells the EUR back across the trader's own order
+        ctx.dataSource.onTradeEvent({order: 30n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 500n, bought: 250n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
+        ctx.dataSource.onTradeEvent({order: 31n, taker: 'CAXIS', maker: TAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
+        //the same pattern across two transactions
+        ctx.dataSource.onTradeEvent({order: 32n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 500n, bought: 250n, left: 0n, ...base((9n << 28n) | 1n, 102), id: (9n << 28n) | 1n})
+        ctx.dataSource.onTradeEvent({order: 33n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 0n, ...base((10n << 28n) | 1n, 102), id: (10n << 28n) | 1n})
+        await flush()
+        expect(flagged).toEqual([false, false, false, false])
+    })
+
+    test('failed transactions are stored and emitted without touching orders or backing', async () => {
+        ctx.dataSource.onOrderEvent(created(1n))
+        await flush()
+        const failures = []
+        ctx.indexer.on('failure', failure => failures.push(failure))
+        ctx.dataSource.loads.length = 0
+        ctx.dataSource.onFailureEvent({
+            position: 99n << 28n,
+            ledger: 120,
+            ts: 1_700_000_500,
+            txHash: 'ab'.repeat(32),
+            fn: 'trade',
+            caller: TAKER,
+            orders: [1n],
+            result: 'invokeHostFunctionTrapped',
+            reason: 'transfer',
+            error: {contract: 'CTOKEN', code: 10},
+            transfer: {token: EUR, fn: 'transfer_from', from: TAKER, to: MAKER, amount: 500n}
+        })
+        await flush()
+        expect(failures).toHaveLength(1)
+        //neither the maker nor the taker is flagged: the payment failure is ambiguous
+        expect(ctx.indexer.backing.get(MAKER, USD).skipped).toBe(0)
+        expect(ctx.dataSource.loads).toEqual([])
+        expect(ctx.indexer.dispatcher.graph.getOrder(1n).amount).toBe(1000n)
+        const [stored] = await ctx.historyStorage.loadFailures({limit: 10, account: MAKER})
+        expect(stored.toJSON()).toMatchObject({
+            type: 'failure',
+            id: (99n << 28n).toString(),
+            fn: 'trade',
+            caller: TAKER,
+            orders: ['1'],
+            reason: 'transfer',
+            error: {contract: 'CTOKEN', code: 10},
+            transfer: {token: EUR, fn: 'transfer_from', from: TAKER, to: MAKER, amount: '500'}
+        })
+        expect(await ctx.historyStorage.loadFailures({limit: 10, account: 'GOTHER'})).toEqual([])
+        expect(await ctx.historyStorage.loadFailures({limit: 10, fn: 'swap'})).toEqual([])
     })
 })
 
@@ -289,7 +398,9 @@ describe('Indexer replay', () => {
         await indexer.init()
         try {
             expect(indexer.contractState.frozen).toBe(true)
-            expect(indexer.contractState.getMarket(USD, EUR)).toMatchObject({refreshed: 2})
+            //a snapshot persisted with the former `a`/`b` market names
+            expect(indexer.contractState.getMarket(USD, EUR)).toEqual({base: EUR, quote: USD, created: 1, refreshed: 2})
+            expect(indexer.backing.get('CAXIS', EUR)).toBeDefined()
             //expired during the downtime: archived
             expect(indexer.dispatcher.graph.getOrder(5n).status).toBe(Order.ORDER_STATUS.EXPIRED)
             expect(indexer.dispatcher.graph.isLive(5n)).toBe(false)
@@ -368,7 +479,7 @@ describe('Indexer change events', () => {
         await flush()
         expect(backing).toEqual(expect.arrayContaining([{owner: MAKER, asset: USD}, {owner: MAKER, asset: EUR}]))
         ctx.dataSource.onFreezeEvent({frozen: true, ...base(50n, 104)})
-        ctx.dataSource.onMarketEvent({a: EUR, b: USD, ...base(60n, 105)})
+        ctx.dataSource.onMarketEvent({base: EUR, quote: USD, ...base(60n, 105)})
         expect(contract).toEqual(['freeze', 'market'])
     })
 })

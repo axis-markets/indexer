@@ -2,6 +2,7 @@ const {EventEmitter} = require('events')
 const Order = require('./entries/order')
 const Trade = require('./entries/trade')
 const Swap = require('./entries/swap')
+const Failure = require('./entries/failure')
 const HistoryStorage = require('./history/history-storage')
 const InMemoryHistoryStorage = require('./history/inmemory-history-storage')
 const DataSource = require('./graph/data-source')
@@ -21,6 +22,7 @@ const historyRoutes = require('./routes/history-routes')
  * - `order` {@link IndexerOrderChange} - an order was created, filled, updated, canceled or expired
  * - `trade` {@link Trade} - a fill was stored
  * - `swap` {@link Swap} - a swap was stored
+ * - `failure` {@link Failure} - a transaction calling the contract failed (data sources that see failed transactions)
  * - `backing` `{owner, asset}` - the tracked backing of a maker changed (balance, allowance, authorization, pending)
  * - `contract` `{kind: 'freeze'|'config'|'market', market?: ContractMarket}` - the contract state changed
  * - `ledger` `number` - a ledger was processed: with a streaming data source after its events and backing changes
@@ -54,7 +56,8 @@ class Indexer extends EventEmitter {
             onChange: (owner, asset) => this.emit('backing', {owner, asset})
         })
         this.dispatcher = new OrderBookDispatcher(this.backing)
-        this.contractState = new ContractState()
+        this.dispatcher.graph.contract = contractAddress
+        this.contractState = new ContractState(contractAddress)
         if (apiPort) {
             initApiServer(this, apiPort)
                 .catch(e => console.error(e))
@@ -117,6 +120,18 @@ class Indexer extends EventEmitter {
      */
     reportedLedger = 0
     /**
+     * Market assets whose AXIS contract record is tracked (authorization to hold the asset in transit)
+     * @type {Set<string>}
+     * @private
+     */
+    contractAssets = new Set()
+    /**
+     * Trade events of the transaction being processed (crossfill detection)
+     * @type {{tx: bigint, trades: TradeEvent[]}}
+     * @private
+     */
+    txTrades = {tx: -1n, trades: []}
+    /**
      * @type {NodeJS.Timeout}
      * @private
      */
@@ -129,6 +144,10 @@ class Indexer extends EventEmitter {
         //load last processed event cursor from the history storage
         const cursor = await this.historyStorage.getCursor()
         this.contractState.restore(await this.historyStorage.loadContractState())
+        for (const market of this.contractState.markets.values()) {
+            this.trackContractAsset(market.base)
+            this.trackContractAsset(market.quote)
+        }
         this.cursor = cursor
         //rebuild the graph in creation order from the active orders and the expired ones their owners can still revive
         const active = await loadAllOrders(filter => this.historyStorage.loadActiveOrders(filter))
@@ -163,6 +182,7 @@ class Indexer extends EventEmitter {
         this.dataSource.onMarketEvent = marketEvent => this.processMarket(marketEvent)
         this.dataSource.onFreezeEvent = freezeEvent => this.processFreeze(freezeEvent)
         this.dataSource.onConfigEvent = configEvent => this.processConfig(configEvent)
+        this.dataSource.onFailureEvent = failureEvent => this.processFailure(failureEvent)
         this.dataSource.onError = e => console.error('Data source error', e)
         if (this.dataSource.streamsBacking) {
             this.dataSource.onBackingEvent = backingEvent => this.processBacking(backingEvent)
@@ -279,18 +299,25 @@ class Indexer extends EventEmitter {
      */
     processTrade(tradeEvent) {
         this.advance(tradeEvent)
+        //a data source reading the call tree knows it exactly, the event pattern stands in otherwise
+        const pattern = this.isCrossfillSettlement(tradeEvent)
+        const crossfill = typeof tradeEvent.crossfill === 'boolean' ? tradeEvent.crossfill : pattern
         const order = this.dispatcher.fill(tradeEvent.order, tradeEvent.left, tradeEvent.ts)
-        const trade = Trade.fromEvent(tradeEvent)
+        const trade = Trade.fromEvent(crossfill ? {...tradeEvent, crossfill} : tradeEvent)
         if (order) {
             this.storeOrder(order)
             //the maker delivered what the taker bought
-            this.emitOrder(tradeEvent.left > 0n ? 'fill' : 'filled', order, {
+            const fill = {
                 sold: tradeEvent.bought,
                 bought: tradeEvent.sold,
                 taker: tradeEvent.taker,
                 trade: trade.id,
                 ts: tradeEvent.ts
-            })
+            }
+            if (crossfill) {
+                fill.crossfill = true
+            }
+            this.emitOrder(tradeEvent.left > 0n ? 'fill' : 'filled', order, fill)
         }
         this.historyStorage.storeTrade(trade, tradeEvent.cursor)
             .catch(e => console.error(e))
@@ -303,6 +330,43 @@ class Indexer extends EventEmitter {
                 }
             }
         }
+    }
+
+    /**
+     * Whether the trade event looks like the fill of a `crossfill` taker order, for data sources that cannot tell (no
+     * call tree). The contract settles the makers first, each fill naming the taker order owner as the taker, then
+     * reports the taker order fill with the caller as the taker and the owner as the maker, in the opposite direction,
+     * for exactly what the owner paid the makers. So the event follows, in the same transaction, fills whose taker is
+     * its maker, in the opposite direction, whose sold amounts add up to its bought amount. Fills of later `swap` hops
+     * name the contract as the taker and never match. Two unrelated calls of one transaction (through a router) could
+     * match by coincidence, which the call tree rules out
+     * @param {TradeEvent} tradeEvent
+     * @return {boolean}
+     * @private
+     */
+    isCrossfillSettlement(tradeEvent) {
+        //positions are TOID-based: ledger, application order, operation, then a 16-bit event index
+        const tx = BigInt(tradeEvent.position ?? tradeEvent.id ?? 0n) >> 28n
+        if (this.txTrades.tx !== tx) {
+            this.txTrades = {tx, trades: []}
+        }
+        const {trades} = this.txTrades
+        let match = false
+        if (tradeEvent.taker !== this.contractAddress) {
+            let paid = 0n
+            for (let i = trades.length - 1; i >= 0; i--) {
+                const fill = trades[i]
+                if (fill.taker !== tradeEvent.maker || fill.soldAsset !== tradeEvent.boughtAsset || fill.boughtAsset !== tradeEvent.soldAsset)
+                    break
+                paid += fill.sold
+                if (paid === tradeEvent.bought) {
+                    match = true
+                    break
+                }
+            }
+        }
+        trades.push(tradeEvent)
+        return match
     }
 
     /**
@@ -333,9 +397,39 @@ class Indexer extends EventEmitter {
      */
     processMarket(marketEvent) {
         this.advance(marketEvent)
-        this.contractState.refreshMarket(marketEvent.a, marketEvent.b, marketEvent.ts)
+        this.contractState.refreshMarket(marketEvent.base, marketEvent.quote, marketEvent.ts)
+        this.trackContractAsset(marketEvent.base)
+        this.trackContractAsset(marketEvent.quote)
         this.storeContractState()
-        this.emit('contract', {kind: 'market', market: this.contractState.getMarket(marketEvent.a, marketEvent.b)})
+        this.emit('contract', {kind: 'market', market: this.contractState.getMarket(marketEvent.base, marketEvent.quote)})
+    }
+
+    /**
+     * A transaction calling the contract failed. It changed no state: the failure is stored and reported for
+     * diagnostics, and never counts against a maker or a taker (a token error on a payment does not tell the payer from
+     * the recipient, and in a `crossfill` the payer is the taker order owner, not the caller)
+     * @param {FailureEvent} failureEvent
+     * @private
+     */
+    processFailure(failureEvent) {
+        const failure = Failure.fromEvent(failureEvent)
+        this.historyStorage.storeFailure(failure)
+            .catch(e => console.error(e))
+        this.emit('failure', failure)
+    }
+
+    /**
+     * Track the AXIS contract's own record in a market asset: makers deliver what a taker buys to the contract, which
+     * forwards it, so an asset whose issuer requires authorization can be bought only once the issuer authorized the
+     * contract (`IntermediaryCannotReceive` otherwise)
+     * @param {string} asset - Token contract address
+     * @private
+     */
+    trackContractAsset(asset) {
+        if (!this.contractAddress || this.contractAssets.has(asset))
+            return
+        this.contractAssets.add(asset)
+        this.backing.track(this.contractAddress, asset)
     }
 
     /**
@@ -480,6 +574,7 @@ module.exports = {
     Order,
     Trade,
     Swap,
+    Failure,
     initApiServer,
     orderbookRoutes,
     historyRoutes,
@@ -508,4 +603,5 @@ module.exports = {
  * @property {string} taker - Taker address
  * @property {bigint} trade - Trade id
  * @property {number} ts - Trade timestamp, UNIX seconds
+ * @property {boolean} [crossfill] - The fill of a `crossfill` taker order (`taker` is the caller paid the surplus)
  */

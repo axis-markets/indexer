@@ -64,6 +64,32 @@ class HistoryDispatcher {
         const data = await this.historyStorage.loadTrades(params)
         return data.map(trade => trade.toJSON())
     }
+
+    /**
+     * Load failed AXIS transactions, newest first
+     * @param {{limit: number, [cursor]: string, [account]: string, [fn]: string}} filter - Query filters; `account`
+     *   matches the caller and the parties of the failed transfer; `cursor` is the id of the last record received (exclusive)
+     * @return {Promise<{}[]>}
+     */
+    async loadFailures(filter) {
+        const params = {}
+        if (filter.account) {
+            if (!isValidActor(filter.account))
+                throw stdErrors.validationError('account')
+            params.account = filter.account
+        }
+        if (filter.fn) {
+            if (typeof filter.fn !== 'string' || !/^[a-z_]{1,32}$/.test(filter.fn))
+                throw stdErrors.validationError('fn')
+            params.fn = filter.fn
+        }
+        if (filter.cursor) {
+            params.cursor = parseIdCursor(filter.cursor)
+        }
+        params.limit = normalizeLimit(filter.limit, 20, 500)
+        const data = await this.historyStorage.loadFailures(params)
+        return data.map(failure => failure.toJSON())
+    }
 }
 
 function validatePair(pair) {

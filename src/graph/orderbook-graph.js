@@ -19,6 +19,12 @@ class OrderBookGraph {
      * @readonly
      */
     backing
+    /**
+     * AXIS contract address, when known: its own backing records tell whether it can hold an asset on its way to the
+     * taker (an asset whose issuer requires authorization needs the contract authorized, `IntermediaryCannotReceive`)
+     * @type {string|undefined}
+     */
+    contract
 
     /**
      * @type {OrderBookGraphSide}

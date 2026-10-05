@@ -1,8 +1,10 @@
 /**
- * Tracks order backing: owner's token balance, trustline authorization and the allowance
- * granted to the AXIS contract. The contract never holds funds, so an open order is fillable only up to
+ * Tracks order backing: owner's token balance, trustline authorization, receive headroom and the allowance
+ * granted to the AXIS contract. The contract holds no funds between calls, so an open order is fillable only up to
  * `min(balance, allowance)` shared across all orders of the maker selling that asset. A fill the maker cannot back is
- * skipped by the contract (`skip` event), which the tracker records per (owner, asset sold).
+ * skipped by the contract (`skip` event), which the tracker records per (owner, asset sold). The record of the asset a
+ * maker receives tells whether the maker can be paid: a missing or deauthorized trustline is skipped, while a payment
+ * beyond the headroom (a full trustline) fails the whole call.
  *
  * Records are either polled (`loader` + periodic sweeps + event-driven reloads) or pushed by in a stream mode.
  */
@@ -173,6 +175,7 @@ class BackingTracker {
             authorized: record.authorized,
             allowance: record.allowance,
             liveUntil: record.liveUntil,
+            headroom: record.headroom,
             updated: record.updated,
             skipped: record.skipped,
             pending: record.pending === true,
@@ -206,7 +209,8 @@ class BackingTracker {
         const pending = this.rechecks.has(key)
         const changed = !existing || !existing.updated || existing.pending !== pending ||
             existing.balance !== record.balance || existing.allowance !== record.allowance ||
-            existing.liveUntil !== record.liveUntil || existing.authorized !== record.authorized
+            existing.liveUntil !== record.liveUntil || existing.authorized !== record.authorized ||
+            existing.headroom !== record.headroom
         this.addRecord(key, {
             owner,
             asset,
@@ -214,6 +218,7 @@ class BackingTracker {
             authorized: record.authorized,
             allowance: record.allowance,
             liveUntil: record.liveUntil,
+            headroom: record.headroom,
             updated,
             skipped: existing?.skipped ?? 0,
             refs: existing?.refs ?? 0,

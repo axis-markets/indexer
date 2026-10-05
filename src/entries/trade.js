@@ -55,6 +55,12 @@ class Trade {
      */
     left
     /**
+     * Whether this is the fill of the taker order of a `crossfill`: its `taker` is the caller, who is paid the surplus
+     * and pays nothing, and its amounts mirror the makers' fills of the same call (excluded from volume and candles)
+     * @type {boolean|undefined}
+     */
+    crossfill
+    /**
      * Ledger sequence
      * @type {number}
      */
@@ -89,6 +95,9 @@ class Trade {
         trade.sold = tradeEvent.sold
         trade.bought = tradeEvent.bought
         trade.left = tradeEvent.left
+        if (tradeEvent.crossfill) {
+            trade.crossfill = true
+        }
         trade.ledger = tradeEvent.ledger
         trade.cursor = tradeEvent.cursor
         trade.ts = tradeEvent.ts
@@ -117,6 +126,9 @@ function serializeTrade(trade) {
     }
     if (trade.left !== undefined) {
         res.left = trade.left.toString()
+    }
+    if (trade.crossfill) {
+        res.crossfill = true
     }
     return res
 }
