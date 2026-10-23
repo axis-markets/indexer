@@ -334,12 +334,13 @@ class Indexer extends EventEmitter {
 
     /**
      * Whether the trade event looks like the fill of a `crossfill` taker order, for data sources that cannot tell (no
-     * call tree). The contract settles the makers first, each fill naming the taker order owner as the taker, then
-     * reports the taker order fill with the caller as the taker and the owner as the maker, in the opposite direction,
-     * for exactly what the owner paid the makers. So the event follows, in the same transaction, fills whose taker is
-     * its maker, in the opposite direction, whose sold amounts add up to its bought amount. Fills of later `swap` hops
-     * name the contract as the taker and never match. Two unrelated calls of one transaction (through a router) could
-     * match by coincidence, which the call tree rules out
+     * call tree). The contract settles the makers first, each fill naming the caller as the taker although the taker
+     * order owner pays the makers, then reports the taker order fill with the caller as the taker and the owner as the
+     * maker, in the opposite direction, for exactly what the owner paid the makers. So the event follows, in the same
+     * transaction, fills of its own taker in the opposite direction whose sold amounts add up to its bought amount, and
+     * its maker is someone else. A `swap` hop crossing the trader's own order names the trader on both sides and never
+     * matches; neither does a caller crossing its own order, which only the call tree tells. Two unrelated calls of one
+     * transaction (through a router), or a cyclic `swap`, could match by coincidence, which the call tree rules out
      * @param {TradeEvent} tradeEvent
      * @return {boolean}
      * @private
@@ -352,11 +353,11 @@ class Indexer extends EventEmitter {
         }
         const {trades} = this.txTrades
         let match = false
-        if (tradeEvent.taker !== this.contractAddress) {
+        if (tradeEvent.maker !== tradeEvent.taker) {
             let paid = 0n
             for (let i = trades.length - 1; i >= 0; i--) {
                 const fill = trades[i]
-                if (fill.taker !== tradeEvent.maker || fill.soldAsset !== tradeEvent.boughtAsset || fill.boughtAsset !== tradeEvent.soldAsset)
+                if (fill.taker !== tradeEvent.taker || fill.soldAsset !== tradeEvent.boughtAsset || fill.boughtAsset !== tradeEvent.soldAsset)
                     break
                 paid += fill.sold
                 if (paid === tradeEvent.bought) {

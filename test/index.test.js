@@ -270,9 +270,9 @@ describe('Indexer event processing', () => {
         const flagged = []
         ctx.indexer.on('trade', trade => flagged.push([trade.id, trade.crossfill === true]))
         const tx = 7n << 28n //same ledger and transaction for every event below
-        //maker fills: the taker order owner pays USD and gets EUR
-        ctx.dataSource.onTradeEvent({order: 20n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
-        ctx.dataSource.onTradeEvent({order: 21n, taker: MAKER, maker: 'GM2', soldAsset: USD, boughtAsset: EUR, sold: 200n, bought: 105n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
+        //maker fills: taken by the caller, the taker order owner pays USD
+        ctx.dataSource.onTradeEvent({order: 20n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
+        ctx.dataSource.onTradeEvent({order: 21n, taker: TAKER, maker: 'GM2', soldAsset: USD, boughtAsset: EUR, sold: 200n, bought: 105n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
         //the taker order fill: the caller as taker, the owner as maker, for what the owner paid
         ctx.dataSource.onTradeEvent({order: 1n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 500n, ...base(tx | 3n, 101), id: tx | 3n})
         await flush()
@@ -287,7 +287,7 @@ describe('Indexer event processing', () => {
         ctx.indexer.on('trade', trade => flagged.push(trade.crossfill === true))
         const tx = 11n << 28n
         //the pattern matches (two unrelated router calls), but the call tree says it is a trade
-        ctx.dataSource.onTradeEvent({order: 40n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n, crossfill: false})
+        ctx.dataSource.onTradeEvent({order: 40n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n, crossfill: false})
         ctx.dataSource.onTradeEvent({order: 41n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 150n, bought: 300n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n, crossfill: false})
         //and a crossfill fill the call tree reports is flagged whatever precedes it
         ctx.dataSource.onTradeEvent({order: 42n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 1n, bought: 1n, left: 0n, ...base((12n << 28n) | 1n, 102), id: (12n << 28n) | 1n, crossfill: true})
@@ -307,12 +307,28 @@ describe('Indexer event processing', () => {
         const flagged = []
         ctx.indexer.on('trade', trade => flagged.push(trade.crossfill === true))
         const tx = 8n << 28n
-        //a cyclic swap: the trader sells USD for EUR, then the contract sells the EUR back across the trader's own order
+        //a cyclic swap: the trader sells USD for EUR, then sells the EUR back across its own order (the contract pays
+        //that maker, the trader is the taker of both hops)
         ctx.dataSource.onTradeEvent({order: 30n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 500n, bought: 250n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
-        ctx.dataSource.onTradeEvent({order: 31n, taker: 'CAXIS', maker: TAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
+        ctx.dataSource.onTradeEvent({order: 31n, taker: TAKER, maker: TAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
         //the same pattern across two transactions
-        ctx.dataSource.onTradeEvent({order: 32n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 500n, bought: 250n, left: 0n, ...base((9n << 28n) | 1n, 102), id: (9n << 28n) | 1n})
+        ctx.dataSource.onTradeEvent({order: 32n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 500n, bought: 250n, left: 0n, ...base((9n << 28n) | 1n, 102), id: (9n << 28n) | 1n})
         ctx.dataSource.onTradeEvent({order: 33n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 250n, bought: 500n, left: 0n, ...base((10n << 28n) | 1n, 102), id: (10n << 28n) | 1n})
+        await flush()
+        expect(flagged).toEqual([false, false, false, false])
+    })
+
+    test('fills of other takers, or whose sold amounts do not add up, are not flagged as crossfill', async () => {
+        const flagged = []
+        ctx.indexer.on('trade', trade => flagged.push(trade.crossfill === true))
+        //the fills before it name another taker (its maker, as the contract reported crossfills before)
+        const tx = 13n << 28n
+        ctx.dataSource.onTradeEvent({order: 50n, taker: MAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(tx | 1n, 101), id: tx | 1n})
+        ctx.dataSource.onTradeEvent({order: 51n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 150n, bought: 300n, left: 0n, ...base(tx | 2n, 101), id: tx | 2n})
+        //the same taker in the opposite direction, but the fills before it did not pay what it bought
+        const other = 14n << 28n
+        ctx.dataSource.onTradeEvent({order: 52n, taker: TAKER, maker: 'GM1', soldAsset: USD, boughtAsset: EUR, sold: 300n, bought: 160n, left: 0n, ...base(other | 1n, 102), id: other | 1n})
+        ctx.dataSource.onTradeEvent({order: 53n, taker: TAKER, maker: MAKER, soldAsset: EUR, boughtAsset: USD, sold: 150n, bought: 299n, left: 0n, ...base(other | 2n, 102), id: other | 2n})
         await flush()
         expect(flagged).toEqual([false, false, false, false])
     })

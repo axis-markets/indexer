@@ -42,8 +42,8 @@ await indexer.init()
 
 ## Contract model
 
-The AXIS contract holds no user funds between calls. An order is backed by its owner's token balance and by a
-standing allowance granted to the contract. Fills are settled with `transfer_from`, the contract acting as the spender:
+The AXIS contract holds no user funds between calls. An order is backed by its owner's token balance and by a standing
+allowance granted to the contract. Fills are settled with `transfer_from`, the contract acting as the spender:
 each maker's asset goes to the contract, the taker pays each maker directly, and the contract forwards what the makers
 delivered to the taker in one transfer at the end of the call. Consequences for the indexer:
 
@@ -73,27 +73,33 @@ delivered to the taker in one transfer at the end of the call. Consequences for 
   including calls made through another contract and failures a calling contract caught, `caught`), and the indexer
   stores them for diagnostics (`/failures`) without touching orders, backing or `skipped`. A failed transfer names both
   parties, neither is blamed.
-- **Crossfill fills.** A `crossfill` reports the maker fills with the taker order owner as the taker, then the taker
-  order fill with the caller (paid the surplus) as the taker and the owner as the maker, for exactly what the owner paid
-  the makers. The indexer flags that last trade `crossfill: true`: it patches the taker order like any fill, while
-  services keep it out of volume and candles. A data source reading the call tree sets `TradeEvent.crossfill` exactly
-  (the RPC data source does when the server returns diagnostic events). Otherwise the indexer recognizes the pattern:
-  the trade events just before it in the same transaction name its maker as the taker, in the opposite direction, and
-  their sold amounts add up to its bought amount.
+- **The taker is the account a fill is made for.** A `trade` event names the trader as the taker even where the contract
+  moves the tokens: every `swap` hop names the trader, although the contract pays the makers of the later hops, and
+  every `crossfill` fill names the caller, although the taker order owner pays the makers. Summed per account, the trade
+  events of a call give each account's net token movement; the contract never shows up.
+- **Crossfill fills.** A `crossfill` reports the maker fills with the caller as the taker, then the taker order fill
+  with the caller (paid the surplus) as the taker and the owner as the maker, for exactly what the owner paid the
+  makers. The indexer flags that last trade `crossfill: true`: it patches the taker order like any fill, while services
+  keep it out of volume and candles. A data source reading the call tree sets `TradeEvent.crossfill` exactly (the RPC
+  data source does when the server returns diagnostic events). Otherwise the indexer recognizes the pattern: the trade
+  events just before it in the same transaction have the same taker, in the opposite direction, their sold amounts add
+  up to its bought amount, and its maker is not its taker. A caller crossing its own order is therefore left to the call
+  tree, and a cyclic `swap` returning exactly its input could match by coincidence.
 - **Trades and swaps have no on-chain id** their id is the event position.
 - **Effective depth.** A maker can deliver at most `min(balance, allowance)` in the asset they sell, shared across all
   their orders in that asset, and only while the allowance is alive. The `BackingTracker` keeps a record per
   `(owner, asset)` for every live order (both order assets: the selling side funds the order, the buying side must be
-  receivable and have room for the payment, `headroom`), refreshed on order events, trades, skips and a periodic sweep, and once more `recheckDelay` after the
-  latest event (the data source may serve ledger state lagging its events). Serialized orders expose `backed` (the
-  order's share of the budget, split among the maker's orders selling the asset oldest first) and `backing`, with
-  `backing.pending` set until that recheck confirms the latest change; expired orders are not tracked and carry neither.
-  With a streaming data source (`streamsBacking`) the records are subscribed instead: the data source pushes every
-  change of a tracked maker per ledger, there are no sweeps or rechecks, and a `skip` triggers one reload.
+  receivable and have room for the payment, `headroom`), refreshed on order events, trades, skips and a periodic sweep,
+  and once more `recheckDelay` after the latest event (the data source may serve ledger state lagging its events).
+  Serialized orders expose `backed` (the order's share of the budget, split among the maker's orders selling the asset
+  oldest first) and `backing`, with `backing.pending` set until that recheck confirms the latest change; expired orders
+  are not tracked and carry neither. With a streaming data source (`streamsBacking`) the records are subscribed instead:
+  the data source pushes every change of a tracked maker per ledger, there are no sweeps or rechecks, and a `skip`
+  triggers one reload.
 - **Contract state.** `freeze`, `config` and `refresh` events maintain `ContractState` (`indexer.contractState`): the
-  frozen switch, the configuration (safety admin, oracle, listing days, listing fee, minimum trade size, ledger time) and
-  the markets opened by `subsidize` (`base`, `quote`) with the time of their last oracle check. It is persisted through
-  `HistoryStorage.storeContractState` (snapshots with the former `a`/`b` market names are still restored).
+  frozen switch, the configuration (safety admin, oracle, listing days, listing fee, minimum trade size, ledger time)
+  and the markets opened by `subsidize` (`base`, `quote`) with the time of their last oracle check. It is persisted
+  through `HistoryStorage.storeContractState` (snapshots with the former `a`/`b` market names are still restored).
 - **The contract's own record.** Makers deliver what a taker buys to the contract, so an asset whose issuer requires
   authorization can be bought only once the issuer authorized the contract. The indexer tracks a backing record of the
   contract address (`graph.contract`) in every market asset, whose `authorized` flag tells routers whether the contract
@@ -114,12 +120,12 @@ delivered to the taker in one transfer at the end of the call. Consequences for 
   fill of a crossfill taker order), `trade`, `swap`, `failure` (a failed transaction calling the contract), `backing`
   (`{owner, asset}`: balance, allowance, authorization or the `pending` state changed), `contract`
   (`{kind: 'freeze'|'config'|'market', market?}`) and `ledger` (once per ledger: with a streaming data source after the
-  ledger's events and backing changes, otherwise with the first event of a new ledger). An embedding service can
-  forward them to its own clients, e.g. over WebSocket.
+  ledger's events and backing changes, otherwise with the first event of a new ledger). An embedding service can forward
+  them to its own clients, e.g. over WebSocket.
 - **Watched accounts** — `indexer.watchBacking(owner, assets)` tracks the backing of an account in the given tokens
-  whether or not it has orders (e.g. a service pushing updates to connected traders watches them in every market
-  token), and resolves once the records are loaded; `unwatchBacking(owner, assets)` releases them. Watches share the
-  reference counting of the orders, so a streaming data source subscribes each `(owner, asset)` pair once.
+  whether or not it has orders (e.g. a service pushing updates to connected traders watches them in every market token),
+  and resolves once the records are loaded; `unwatchBacking(owner, assets)` releases them. Watches share the reference
+  counting of the orders, so a streaming data source subscribes each `(owner, asset)` pair once.
 - **Pair order** — market identity uses the contract canonical order (`canonicalPair`, `compareAssets`, `toPair`
   in `src/utils/asset-pair.js`): assets sorted like Soroban `Address` values (the XDR `ScAddress` bytes), which is not
   string order. `toPair(x, y)` is `base/quote` with the base asset first. Pair keys, `/markets` and the contract state
@@ -136,21 +142,23 @@ delivered to the taker in one transfer at the end of the call. Consequences for 
 - **`DataSource`** (abstract) — implement this interface to deliver AXIS contract events (`onOrderEvent`,
   `onTradeEvent`, `onSwapEvent`, `onSkipEvent`, `onMarketEvent`, `onFreezeEvent`, `onConfigEvent`, `onError`, and
   optionally `onFailureEvent`) and to read ledger state (`loadBacking(asset, owner, spender)`, with `headroom` for a
-  trustline and the issuer's `AUTH_REQUIRED` default for a contract holder without a balance entry). Every event carries `cursor` (opaque resume token),
-  `position` (monotonic ordinal), `ledger` and `ts`. A data source that follows ledger state itself sets
-  `streamsBacking` and implements `subscribeBacking(asset, owner, spender)` (resolves with the current backing),
-  `unsubscribeBacking`, `onBackingEvent` (`{owner, asset, spender, balance, authorized, allowance, liveUntil, headroom, ledger}`)
+  trustline and the issuer's `AUTH_REQUIRED` default for a contract holder without a balance entry). Every event carries
+  `cursor` (opaque resume token), `position` (monotonic ordinal), `ledger` and `ts`. A data source that follows ledger
+  state itself sets `streamsBacking` and implements `subscribeBacking(asset, owner, spender)` (resolves with the current
+  backing), `unsubscribeBacking`, `onBackingEvent`
+  (`{owner, asset, spender, balance, authorized, allowance, liveUntil, headroom, ledger}`)
   and `onLedger(ledger, ts)`. The indexer ships no data source: the consumer implements this interface or injects an
   existing implementation. See the JSDoc typedefs in `src/graph/data-source.js`.
 - **`HistoryStorage`** (abstract) — implement this interface to persist active orders, archived (filled, cancelled,
   expired) orders, executed trades and swaps (one log, `type` field, with the `crossfill` flag), the contract state, the
-  last processed event cursor and, optionally, failed transactions (`storeFailure`, `loadFailures`). Order records are upserted by `(id, position)`, so a revived expired order moves back to the active set;
+  last processed event cursor and, optionally, failed transactions (`storeFailure`, `loadFailures`). Order records are
+  upserted by `(id, position)`, so a revived expired order moves back to the active set;
   `loadArchivedOrders` takes a `status` filter (the indexer reloads `EXPIRED` orders at startup). Reads return records
   newest first, orders by creation `position` and trades by `id` (both compared as big integers), and cursors are
   exclusive: `position` for orders, `id` for trades. With a streaming data source that exposes a `cursor`, the indexer
   also calls `storeCursor(cursor)` after every processed ledger, so a quiet contract keeps a resume point within the
-  source retention. `InMemoryHistoryStorage` ships as a reference implementation; production deployments are expected
-  to use a durable backend such as a SQL database.
+  source retention. `InMemoryHistoryStorage` ships as a reference implementation; production deployments are expected to
+  use a durable backend such as a SQL database.
 - **HTTP API** — Express server with CORS, registered through `src/server/router.js`. The route modules are exported as
   `orderbookRoutes` and `historyRoutes` for embedding into another Express app.
 

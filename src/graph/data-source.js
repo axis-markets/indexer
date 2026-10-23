@@ -213,7 +213,8 @@ module.exports = DataSource
  * @typedef {ContractEventBase} TradeEvent
  * @property {bigint} id - Trade id (equals `position`)
  * @property {bigint} order - Maker order id
- * @property {string} taker - Trader account address
+ * @property {string} taker - Account the fill was made for: the trader (every `swap` hop included, although the
+ *   contract pays the makers of the later hops) or the `crossfill` caller (although the taker order owner pays the makers)
  * @property {string} maker - Maker account address
  * @property {string} soldAsset - Asset sold by the taker
  * @property {string} boughtAsset - Asset bought by the taker
